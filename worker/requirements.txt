@@ -1,0 +1,35 @@
+# Celery
+celery==5.3.6
+redis==5.0.1
+
+# Database
+sqlalchemy==2.0.25
+psycopg2-binary==2.9.9
+
+# MinIO
+minio==7.2.0
+
+# ASR - faster-whisper
+faster-whisper==0.10.0
+ctranslate2>=3.22.0
+
+# VAD
+torch==2.1.2
+torchaudio==2.1.2
+
+# Audio processing
+pydub==0.25.1
+librosa==0.10.1
+soundfile==0.12.1
+
+# Diarization (optional)
+pyannote.audio==3.1.1
+speechbrain==0.5.16
+
+# Utilities
+numpy==1.26.3
+structlog==24.1.0
+python-dotenv==1.0.0
+
+# Testing
+pytest==7.4.4

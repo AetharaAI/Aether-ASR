@@ -1,0 +1,200 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: asr-postgres
+    environment:
+      POSTGRES_USER: asr
+      POSTGRES_PASSWORD: asr
+      POSTGRES_DB: asr
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U asr" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - asr-network
+
+  # Redis Cache & Queue
+  redis:
+    image: redis:7-alpine
+    container_name: asr-redis
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - asr-network
+
+  # MinIO Object Storage
+  minio:
+    image: minio/minio:latest
+    container_name: asr-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - asr-network
+
+  # Create MinIO bucket on startup
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c " sleep 10; /usr/bin/mc config host add myminio http://minio:9000 minioadmin minioadmin; /usr/bin/mc mb myminio/asr-storage || true; /usr/bin/mc policy set private myminio/asr-storage; exit 0; "
+    networks:
+      - asr-network
+
+  # FastAPI Backend
+  api:
+    build:
+      context: ../api
+      dockerfile: Dockerfile
+    container_name: asr-api
+    environment:
+      DATABASE_URL: postgresql+asyncpg://asr:asr@postgres:5432/asr
+      REDIS_URL: redis://redis:6379/0
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: asr-storage
+      MINIO_SECURE: "false"
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      JWT_SECRET: change-me-in-production
+      RATE_LIMIT_ENABLED: "true"
+      LOG_LEVEL: INFO
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - asr-network
+    restart: unless-stopped
+
+  # Celery Worker (GPU-enabled)
+  worker:
+    build:
+      context: ../worker
+      dockerfile: Dockerfile
+    container_name: asr-worker
+    environment:
+      DATABASE_URL: postgresql://asr:asr@postgres:5432/asr
+      REDIS_URL: redis://redis:6379/0
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: asr-storage
+      MINIO_SECURE: "false"
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      CELERY_WORKER_CONCURRENCY: "1"
+      WHISPER_MODELS_DIR: /models
+      WHISPER_PRELOAD_MODELS: "large-v3"
+      CUDA_VISIBLE_DEVICES: "0"
+    volumes:
+      - /mnt/aetherpro/models/audio/whisper:/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - asr-network
+    restart: unless-stopped
+
+  # React Frontend
+  ui:
+    build:
+      context: ../ui
+      dockerfile: Dockerfile
+    container_name: asr-ui
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+    networks:
+      - asr-network
+    restart: unless-stopped
+
+  # Prometheus (Optional - for monitoring)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: asr-prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - asr-network
+    profiles:
+      - monitoring
+
+  # Grafana (Optional - for dashboards)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: asr-grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - asr-network
+    profiles:
+      - monitoring
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  prometheus_data:
+  grafana_data:
+
+
+networks:
+  asr-network:
+    driver: bridge

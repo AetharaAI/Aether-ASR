@@ -120,7 +120,7 @@ services:
       CELERY_WORKER_CONCURRENCY: "1"
       WHISPER_MODELS_DIR: /models
       WHISPER_PRELOAD_MODELS: "large-v3"
-      CUDA_VISIBLE_DEVICES: "0"
+      CUDA_VISIBLE_DEVICES: "1"
     volumes:
       - /mnt/aetherpro/models/audio/whisper:/models
     deploy:
@@ -130,6 +130,7 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [ gpu ]
+              device_ids: [ '1' ]
     depends_on:
       postgres:
         condition: service_healthy

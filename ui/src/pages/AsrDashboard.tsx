@@ -93,9 +93,16 @@ export default function AsrDashboard() {
         <div className="min-h-screen bg-[#121212] text-white p-6 md:p-12 font-sans">
 
             <header className="flex justify-between items-center mb-8 border-b border-gray-800 pb-4">
-                <div>
-                    <h1 className="text-3xl font-bold tracking-tight text-emerald-400">Chatterbox ASR Server</h1>
-                    <a href="/docs" className="text-sm text-gray-400 hover:text-emerald-300">API Docs</a>
+                <div className="flex items-center space-x-4">
+                    <img
+                        src="/Aether-Shield-Perceptor-Merged.png"
+                        alt="Aether-ASR Logo"
+                        className="h-12 w-auto object-contain"
+                    />
+                    <div>
+                        <h1 className="text-3xl font-bold tracking-tight text-emerald-400">Aether-ASR Server</h1>
+                        <a href="/docs" className="text-sm text-gray-400 hover:text-emerald-300">API Docs</a>
+                    </div>
                 </div>
                 <div className="flex space-x-4">
                     {/* Placeholder for future header actions */}

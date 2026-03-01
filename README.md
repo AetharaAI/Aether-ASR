@@ -67,7 +67,7 @@ docker compose up -d --build
 ```
 
 ### 4. Create Reverse Proxy Domain (asr.aetherpro.us)
-Create the subdomain `asr.aetherpro.us` in your DNS registrar pointing to your OVHCloud IP address, and proxy port 3000 to port 80 or 443 with Nginx.
+Create the subdomain `asr.aetherpro.us` in your DNS registrar pointing to your OVHCloud IP address, and proxy port 3010 to port 80 or 443 with Nginx.
 
 A generic Nginx block:
 ```nginx
@@ -75,7 +75,7 @@ server {
     server_name asr.aetherpro.us;
 
     location / {
-        proxy_pass http://localhost:3000;
+        proxy_pass http://localhost:3010;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }

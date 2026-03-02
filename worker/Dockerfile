@@ -12,6 +12,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libffi-dev \
     ffmpeg \
+    pkg-config \
+    libavformat-dev \
+    libavcodec-dev \
+    libavdevice-dev \
+    libavutil-dev \
+    libswscale-dev \
+    libswresample-dev \
+    libavfilter-dev \
     libsndfile1 \
     git \
     wget \

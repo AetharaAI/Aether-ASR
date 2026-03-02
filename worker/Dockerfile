@@ -6,9 +6,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Install Python and dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3.11 \
+    python3 \
     python3-pip \
-    python3.11-dev \
+    python3-dev \
     build-essential \
     libffi-dev \
     ffmpeg \
@@ -26,7 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Python 3.11 as default
-RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3 1
 RUN update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1
 
 # Upgrade pip
@@ -49,7 +49,7 @@ ENV WHISPER_MODELS_DIR=/models
 FROM base as production
 
 # Copy Python packages from builder
-COPY --from=builder /usr/local/lib/python3.11/dist-packages /usr/local/lib/python3.11/dist-packages
+COPY --from=builder /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /models /models
 

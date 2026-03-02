@@ -22,9 +22,56 @@ async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit
 
 
 async def init_db():
-    """Initialize database tables."""
+    """Initialize database tables and seed default data."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        
+    async with async_session() as session:
+        # Check if default tenant exists
+        result = await session.execute(select(Tenant).where(Tenant.slug == 'default'))
+        tenant = result.scalar_one_or_none()
+        
+        if not tenant:
+            tenant_id = uuid.UUID('00000000-0000-0000-0000-000000000001')
+            tenant = Tenant(
+                id=tenant_id,
+                name='Default Tenant',
+                slug='default',
+                config={
+                    "default_model": "base",
+                    "default_compute_type": "float16",
+                    "max_file_size_mb": 500,
+                    "max_duration_seconds": 7200,
+                    "default_retention_days": 7,
+                    "allowed_models": ["tiny", "base", "small", "medium", "large-v3"],
+                    "features": {
+                        "vad_enabled": True,
+                        "diarization_enabled": False,
+                        "word_timestamps": True
+                    }
+                },
+                limits={
+                    "requests_per_minute": 60,
+                    "requests_per_hour": 1000,
+                    "audio_seconds_per_day": 86400,
+                    "concurrent_jobs": 5
+                },
+                is_active=True
+            )
+            session.add(tenant)
+            
+            # Create default API key
+            api_key = APIKey(
+                id=uuid.UUID('00000000-0000-0000-0000-000000000002'),
+                tenant_id=tenant_id,
+                key_hash='a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3',  # hash of '123'
+                key_prefix='test-key',
+                name='Default API Key',
+                scopes='["transcription:read", "transcription:write"]',
+                is_active=True
+            )
+            session.add(api_key)
+            await session.commit()
 
 
 async def check_database() -> bool:

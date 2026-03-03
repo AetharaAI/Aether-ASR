@@ -18,7 +18,8 @@ minio==7.2.0
 celery==5.3.6
 
 # Authentication
-pyjwt==2.8.0
+PyJWT[crypto]==2.8.0
+cryptography>=41.0.0
 passlib==1.7.4
 bcrypt==4.1.2
 
@@ -48,3 +49,6 @@ httpx==0.26.0
 python-dotenv==1.0.0
 httpx==0.26.0
 aiofiles==23.2.1
+
+# Billing
+stripe==8.3.0

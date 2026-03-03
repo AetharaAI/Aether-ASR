@@ -1,10 +1,11 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import AsrDashboard from './pages/AsrDashboard';
+import { AuthProvider } from './auth/AuthProvider';
 
 function App() {
   return (
-    <>
+    <AuthProvider>
       <Toaster position="top-right"
         toastOptions={{
           style: {
@@ -18,7 +19,7 @@ function App() {
           <Route path="/" element={<AsrDashboard />} />
         </Routes>
       </BrowserRouter>
-    </>
+    </AuthProvider>
   );
 }
 

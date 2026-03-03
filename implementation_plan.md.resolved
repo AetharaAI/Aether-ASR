@@ -1,80 +1,81 @@
-# Fix Aether-ASR Docker Deployment Errors
-
-Two issues are preventing the ASR stack from running on the OVH VM.
-
-## Issue 1: API Container — `ModuleNotFoundError: No module named 'app.models'`
-
-**Root cause**: The [.gitignore](file:///home/cory/Aether-ASR/.gitignore) contains `models/` on line 71. This is intended to exclude ML model weight files (`.bin`, `.pt`, etc.), but the pattern also matches **`api/app/models/`** — the Python package directory containing `schemas.py`, `database.py`, and `__init__.py`.
-
-Since these files are not tracked by git, when the repo is cloned/pulled on the VM, the `api/app/models/` directory is entirely absent. The Docker build's `COPY app/ ./app/` then copies nothing for that subdirectory, so `from app.models.schemas import ...` fails.
-
-**Verified with**:
-- `git check-ignore -v api/app/models/` → `.gitignore:71:models/   api/app/models/`
-- `git ls-files api/app/models/` → (empty — nothing tracked)
-
-## Issue 2: Worker Container — Model Load Permission Denied
-
-The worker logs show:
-```
-Error logging to file "/home/asr/.cache/huggingface/xet/logs/..." (Permission denied (os error 13))
-model_load_failed  error=Data processing error: I/O error: Permission denied (os error 13)
-```
-
-The `asr` user can't write to its HuggingFace cache dir. The models are expected to be at the mounted volume `/models` (mapped from host's `/mnt/aetherpro/models/audio/whisper`), but `faster-whisper` still needs a writable cache directory.
-
----
+# Goal Description
+The user experienced a React crash (white screen) after completing a transcription, highlighting a need to review the recent [AsrDashboard.tsx](file:///home/cory/Aether-ASR/ui/src/pages/AsrDashboard.tsx) changes. Additionally, we are implementing a **Unified SaaS Entitlement Architecture** securing the entire Aether Audio Stack using Passport-IAM (OIDC) and Stripe for subscription management.
 
 ## Proposed Changes
 
-### Fix 1: `.gitignore`
+---
 
-#### [MODIFY] [.gitignore](file:///home/cory/Aether-ASR/.gitignore)
+### Phase 1: Fix Whitescreen Crash
+We need to investigate [AsrDashboard.tsx](file:///home/cory/Aether-ASR/ui/src/pages/AsrDashboard.tsx) to see why it crashed upon [handleGenerateWithFile](file:///home/cory/Aether-ASR/ui/src/pages/AsrDashboard.tsx#119-165) completion. It's highly likely that a state update in the `pollInterval` success block, or the rendering of the `ttsVoices` dropdown, threw an uncaught TypeError. We will review and patch this logic.
 
-Change the `models/` pattern to only match the **root-level** `models/` directory (for ML weights) and not subdirectories like `api/app/models/`:
+### Phase 2: OIDC Authentication (Passport-IAM)
 
-```diff
- # Models (large files)
- *.bin
- *.pt
- *.pth
- *.ckpt
- *.safetensors
--models/
-+/models/
-```
+We will integrate `react-oidc-context` (built on `oidc-client-ts`) to provide a robust, standard-compliant PKCE OAuth2 flow in the React frontend.
 
-The leading `/` makes it anchored to the repo root only.
+#### [NEW] `ui/src/auth/AuthProvider.tsx`
+Create an OIDC Provider wrapper using `react-oidc-context`.
+- Configured to use the existing Keycloak instance: `https://passport.aetherpro.us/auth/realms/aetherpro/` (or similar, based on exact URL structure provided by the user).
+- Client ID: `aether-asr`
+- Response Type: `code` (PKCE)
+- Redirect URI: `https://asr.aetherpro.us/`
 
-Then force-add the previously ignored files:
+#### [MODIFY] [ui/src/App.tsx](file:///home/cory/Aether-ASR/ui/src/App.tsx)
+Wrap the main application in the new `<AuthProvider>`. If the user is not authenticated, render a Login gate (e.g., a "Sign in with Passport" button). If authenticated, render the [AsrDashboard](file:///home/cory/Aether-ASR/ui/src/pages/AsrDashboard.tsx#8-435).
 
-```bash
-git add -f api/app/models/
-git commit -m "fix: track api/app/models/ Python package (was git-ignored)"
-git push
-```
+#### [MODIFY] [ui/src/services/api.ts](file:///home/cory/Aether-ASR/ui/src/services/api.ts) & [ui/src/services/ttsApi.ts](file:///home/cory/Aether-ASR/ui/src/services/ttsApi.ts)
+Implement an Axios interceptor to automatically inject the user's `access_token` into the `Authorization: Bearer <token>` header for all outgoing backend requests.
 
-### Fix 2: Worker Dockerfile — HuggingFace Cache Permissions
-
-#### [MODIFY] [Dockerfile](file:///home/cory/Aether-ASR/worker/Dockerfile)
-
-Add writable cache directories for the `asr` user before switching to non-root:
-
-```diff
- # Set ownership
- RUN chown -R asr:asr /app
-+
-+# Create writable cache directories for HuggingFace/faster-whisper
-+RUN mkdir -p /home/asr/.cache/huggingface && chown -R asr:asr /home/asr
-```
+#### [MODIFY] [api/app/main.py](file:///home/cory/Aether-ASR/api/app/main.py) & ASR Services (Backend FastAPI)
+We will completely overhaul the authentication logic in the ASR backend to align with the Unified SaaS Architecture. We will remove the local JWT secret logic and replace it with Passport JWKS validation and strict role enforcement.
 
 ---
 
+### Phase 3: Unified SaaS Entitlement Architecture
+
+Implement full subscription-based access control for the Aether Audio Stack (ASR, TTS, SAP) relying on Stripe, Passport, and FastAPI services. 
+
+#### Identity Layer (Passport)
+- Use realm role: `pro_audio`. Must be included in the access token (`realm_access.roles`).
+- Create a new confidential client in Passport named `billing-service` to handle Admin API tasks.
+
+#### New Billing Service & Stripe Integration
+We will establish a separate `billing-service` (or a dedicated module/router) responsible for talking to Stripe.
+- **Goal:** Create a Stripe product structured as a recurring monthly subscription ($29) for `Aether Audio Pro`.
+- **Endpoints:**
+  - `POST /billing/create-checkout-session`: Accepts user email/id, returns a Stripe checkout URL.
+  - `POST /billing/webhook`: Verifies Stripe signatures and events (`checkout.session.completed`, `customer.subscription.deleted`, `invoice.payment_failed`).
+  - `GET /billing/status`: Returns subscription status, tier, and renewal date for the UI.
+
+#### Automated Role Mapping Logic
+The billing service webhook will directly manage Passport-IAM realm roles:
+- On `checkout.session.completed`: Extract email, lookup Passport user, and assign the `pro_audio` realm role.
+- On `customer.subscription.deleted`: Lookup Passport user and remove the `pro_audio` realm role.
+- On `invoice.payment_failed`: Mark user in a warning state (no immediate removal unless canceled).
+
+#### JWT Validation Across All Services (ASR, TTS, SAP)
+Each microservice in the Aether Audio Stack must natively enforce entitlements without talking to Stripe or issuing its own JWTs.
+- **JWKS Validation:** Validate issuer, audience, signature, and expiration exclusively from Passport-issued tokens.
+- **Role Enforcement:** Introduce `require_pro_audio()` dependencies across all protected routes that checks if `"pro_audio" in token["realm_access"]["roles"]`.
+
+#### Separation of Concerns
+This architecture enforces strict boundaries:
+- **Billing Service:** Talks to Stripe and Passport Admin API.
+- **ASR/TTS/SAP:** Validates JWTs natively. Never talks to Stripe.
+- **Passport:** Never talks to Stripe. Only receives role updates from the Billing Service.
+
+## Settings Required from User
+We need to confirm the exact `authority` URL (the base URL for the OIDC discovery document, typically `https://passport.aetherpro.us/admin/realms/aetherpro` or `https://passport.aetherpro.us/realms/aetherpro`).
+
 ## Verification Plan
 
-### On VM (manual — user runs these after pushing)
-
-1. `git pull` on the VM
-2. Verify `api/app/models/` directory exists: `ls -la api/app/models/`
-3. `cd infra && docker compose up --build -d`
-4. `docker compose logs asr-api` — should no longer show `ModuleNotFoundError`
-5. `docker compose logs asr-worker` — should no longer show permission denied for HuggingFace cache
+### End-to-End Test Plan
+1. Run the UI and confirm the whitescreen on transcription is fixed.
+2. User accesses the UI and is redirected to log in via Passport-IAM.
+3. User logs in. Without the `pro_audio` role, access is denied by the backend.
+4. User purchases a subscription via the Stripe Checkout Session.
+5. The Stripe webhook fires and the `billing-service` assigns the `pro_audio` role via Passport Admin API.
+6. User logs out and logs back in to refresh their JWT claims.
+7. Access is granted to ASR and TTS backend endpoints.
+8. User cancels the subscription in Stripe.
+9. Webhook fires, role is removed.
+10. Access to ASR and TTS endpoints is once again denied.

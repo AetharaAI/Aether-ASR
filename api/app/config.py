@@ -85,6 +85,16 @@ class Settings(BaseSettings):
     METRICS_ENABLED: bool = True
     TRACING_ENABLED: bool = False
     
+    # Billing & Identity
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+    PRO_TIER_PRICE_ID: str = ""
+    STRIPE_SUCCESS_URL: str = "https://asr.aetherpro.us/billing/success"
+    STRIPE_CANCEL_URL: str = "https://asr.aetherpro.us/billing/cancel"
+    PASSPORT_CLIENT_ID: str = "billing-service"
+    PASSPORT_CLIENT_SECRET: str = ""
+    PASSPORT_ADMIN_URL: str = "https://passport.aetherpro.us/admin/realms/aetherpro"
+    
     class Config:
         env_file = ".env"
         case_sensitive = True

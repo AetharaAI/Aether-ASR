@@ -7,6 +7,27 @@ const ttsApiClient = axios.create({
     baseURL: TTS_BASE_URL,
 });
 
+const getOidcToken = () => {
+    try {
+        const oidcStorage = localStorage.getItem('oidc.user:https://passport.aetherpro.us/realms/aetherpro:aether-asr');
+        if (oidcStorage) {
+            const user = JSON.parse(oidcStorage);
+            return user.access_token;
+        }
+    } catch (e) {
+        console.error("Failed to parse OIDC token from storage", e);
+    }
+    return null;
+};
+
+ttsApiClient.interceptors.request.use((config) => {
+    const token = getOidcToken();
+    if (token) {
+        config.headers['Authorization'] = `Bearer ${token}`;
+    }
+    return config;
+});
+
 export const getPredefinedVoices = async () => {
     try {
         const response = await ttsApiClient.get('/get_predefined_voices');

@@ -175,3 +175,11 @@ class WebSocketMessage(BaseModel):
     code: Optional[str] = None
     message: Optional[str] = None
     config: Optional[Dict[str, Any]] = None
+
+
+class SubscriptionStatusResponse(BaseModel):
+    passport_user_id: str
+    stripe_subscription_id: Optional[str] = None
+    status: str
+    current_period_end: Optional[datetime] = None
+    tier: str = "Aether Audio Pro"

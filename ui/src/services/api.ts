@@ -11,11 +11,24 @@ const api = axios.create({
   },
 });
 
-// Add API key to requests
+const getOidcToken = () => {
+  try {
+    const oidcStorage = localStorage.getItem('oidc.user:https://passport.aetherpro.us/realms/aetherpro:aether-asr');
+    if (oidcStorage) {
+      const user = JSON.parse(oidcStorage);
+      return user.access_token;
+    }
+  } catch (e) {
+    console.error("Failed to parse OIDC token from storage", e);
+  }
+  return null;
+};
+
+// Add OIDC Token to requests
 api.interceptors.request.use((config) => {
-  const apiKey = localStorage.getItem('api_key');
-  if (apiKey) {
-    config.headers['X-API-Key'] = apiKey;
+  const token = getOidcToken();
+  if (token) {
+    config.headers['Authorization'] = `Bearer ${token}`;
   }
   return config;
 });
@@ -25,8 +38,9 @@ api.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('api_key');
-      window.location.href = '/login';
+      // Token may be invalid/expired, let react-oidc-context handle refresh or login
+      localStorage.removeItem('oidc.user:https://passport.aetherpro.us/realms/aetherpro:aether-asr');
+      window.location.href = '/';
     }
     return Promise.reject(error);
   }

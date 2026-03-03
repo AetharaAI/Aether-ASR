@@ -195,3 +195,24 @@ class AuditLog(Base):
     ip_address = Column(INET)
     user_agent = Column(Text)
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    passport_user_id = Column(String(255), unique=True, nullable=False)
+    stripe_customer_id = Column(String(255), nullable=False)
+    stripe_subscription_id = Column(String(255), unique=True, nullable=False)
+    status = Column(String(50), nullable=False)
+    current_period_end = Column(DateTime(timezone=True), nullable=False)
+    
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class StripeEventIdempotency(Base):
+    __tablename__ = "stripe_event_idempotency"
+    
+    event_id = Column(String(255), primary_key=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)

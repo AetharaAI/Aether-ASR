@@ -1,0 +1,40 @@
+# Goal Description
+The user experienced a React crash (white screen) after completing a transcription, highlighting a need to review the recent [AsrDashboard.tsx](file:///home/cory/Aether-ASR/ui/src/pages/AsrDashboard.tsx) changes for unhandled state or rendering edge-cases. Additionally, they want to integrate **Passport-IAM** (a Keycloak fork) to secure the UI via OIDC with the PKCE flow.
+
+## Proposed Changes
+
+---
+
+### Phase 1: Fix Whitescreen Crash
+We need to investigate [AsrDashboard.tsx](file:///home/cory/Aether-ASR/ui/src/pages/AsrDashboard.tsx) to see why it crashed upon [handleGenerateWithFile](file:///home/cory/Aether-ASR/ui/src/pages/AsrDashboard.tsx#119-165) completion. It's highly likely that a state update in the `pollInterval` success block, or the rendering of the `ttsVoices` dropdown, threw an uncaught TypeError. We will review and patch this logic.
+
+### Phase 2: OIDC Authentication (Passport-IAM)
+
+We will integrate `react-oidc-context` (built on `oidc-client-ts`) to provide a robust, standard-compliant PKCE OAuth2 flow in the React frontend.
+
+#### [NEW] `ui/src/auth/AuthProvider.tsx`
+Create an OIDC Provider wrapper using `react-oidc-context`.
+- Configured to use the existing Keycloak instance: `https://passport.aetherpro.us/auth/realms/aetherpro/` (or similar, based on exact URL structure provided by the user).
+- Client ID: `aether-asr`
+- Response Type: `code` (PKCE)
+- Redirect URI: `https://asr.aetherpro.us/`
+
+#### [MODIFY] [ui/src/App.tsx](file:///home/cory/Aether-ASR/ui/src/App.tsx)
+Wrap the main application in the new `<AuthProvider>`. If the user is not authenticated, render a Login gate (e.g., a "Sign in with Passport" button). If authenticated, render the [AsrDashboard](file:///home/cory/Aether-ASR/ui/src/pages/AsrDashboard.tsx#8-435).
+
+#### [MODIFY] [ui/src/services/api.ts](file:///home/cory/Aether-ASR/ui/src/services/api.ts) & [ui/src/services/ttsApi.ts](file:///home/cory/Aether-ASR/ui/src/services/ttsApi.ts)
+Implement an Axios interceptor to automatically inject the user's `access_token` into the `Authorization: Bearer <token>` header for all outgoing backend requests.
+
+#### [MODIFY] [api/app/main.py](file:///home/cory/Aether-ASR/api/app/main.py) (Backend FastApi)
+Currently, the backend has no OAuth2 logic configured for this realm. We will need to decide if we want to add JWT bearer validation to the API endpoints to match the UI protection. For this phase, we will focus purely on gating the UI.
+
+## Settings Required from User
+We need to confirm the exact `authority` URL (the base URL for the OIDC discovery document, typically `https://passport.aetherpro.us/admin/realms/aetherpro` or `https://passport.aetherpro.us/realms/aetherpro`).
+
+## Verification Plan
+
+### Manual Verification
+1. Run the UI.
+2. Confirm that accessing `https://asr.aetherpro.us/` redirects to the Passport-IAM login screen.
+3. Authenticate and confirm redirection back to the dashboard.
+4. Test a transcription to ensure the white screen crash is resolved.

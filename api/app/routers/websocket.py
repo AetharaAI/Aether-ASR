@@ -6,7 +6,7 @@ import json
 import asyncio
 
 from app.models.schemas import WebSocketMessage
-from app.services.auth import verify_api_key_websocket
+from app.services.auth import verify_api_key
 
 
 router = APIRouter()
@@ -22,7 +22,7 @@ async def websocket_transcribe(
     """WebSocket endpoint for real-time streaming transcription."""
     # Verify API key
     try:
-        key_obj = await verify_api_key_websocket(api_key)
+        key_obj = await verify_api_key(api_key)
     except HTTPException:
         await websocket.close(code=1008, reason="Invalid API key")
         return

@@ -125,7 +125,7 @@ services:
       TRANSFORMERS_CACHE: /mnt/hf-cache
       HF_DATASETS_CACHE: /mnt/hf-cache
     volumes:
-      - /mnt/aetherpro/models/audio/whisper:/models
+      - /mnt/aetherpro/models/audio:/models
       - /mnt/aetherpro/hf-cache:/mnt/hf-cache
     deploy:
       resources:

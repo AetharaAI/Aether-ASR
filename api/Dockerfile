@@ -33,6 +33,7 @@ RUN groupadd -r asr && useradd -r -g asr asr
 
 # Set working directory
 WORKDIR /app
+ENV PYTHONPATH=/app
 
 # Copy application code
 COPY app/ ./app/

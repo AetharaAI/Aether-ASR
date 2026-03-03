@@ -124,7 +124,7 @@ class Artifact(Base):
     storage_path = Column(String(1024), nullable=False)
     size_bytes = Column(Integer, nullable=False)
     checksum = Column(String(64))
-    metadata = Column(JSON, default=dict)
+    artifact_metadata = Column(JSON, default=dict)
     download_count = Column(Integer, default=0)
     last_downloaded_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)

@@ -1,6 +1,7 @@
 """Pydantic settings configuration for ASR API."""
 from pydantic_settings import BaseSettings
 from typing import List, Optional
+from pydantic import field_validator
 import os
 
 
@@ -44,10 +45,15 @@ class Settings(BaseSettings):
     
     # ASR Models
     WHISPER_MODELS_DIR: str = "/models"
-    WHISPER_DEFAULT_MODEL: str = "base"
+    WHISPER_DEFAULT_MODEL: str = "large-v3"
     WHISPER_COMPUTE_TYPE: str = "float16"
     WHISPER_DEVICE: str = "cuda"
-    WHISPER_PRELOAD_MODELS: List[str] = ["tiny", "base"]
+    WHISPER_PRELOAD_MODELS: str = "large-v3"
+    
+    @property
+    def whisper_preload_models_list(self) -> List[str]:
+        """Get preload models as a list."""
+        return [m.strip() for m in self.WHISPER_PRELOAD_MODELS.split(",") if m.strip()]
     
     # Processing
     MAX_FILE_SIZE_MB: int = 500

@@ -73,7 +73,7 @@ services:
       dockerfile: Dockerfile
     container_name: asr-api
     env_file:
-      - ../.env
+      - .env
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-asr}:${POSTGRES_PASSWORD:-asr}@postgres:5432/${POSTGRES_DB:-asr}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
@@ -108,7 +108,7 @@ services:
       dockerfile: Dockerfile
     container_name: asr-worker
     env_file:
-      - ../.env
+      - .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-asr}:${POSTGRES_PASSWORD:-asr}@postgres:5432/${POSTGRES_DB:-asr}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}

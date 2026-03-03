@@ -20,18 +20,17 @@ class GPUPool:
     @classmethod
     def warmup(cls):
         """Preload default models on startup."""
-        preload_models = os.getenv("WHISPER_PRELOAD_MODELS", "tiny,base").split(",")
+        preload_raw = os.getenv("WHISPER_PRELOAD_MODELS", "large-v3")
+        preload_models = [m.strip() for m in preload_raw.split(",") if m.strip()]
         
         logger.info("warming_up_models", models=preload_models)
         
         for model_name in preload_models:
-            model_name = model_name.strip()
-            if model_name:
-                try:
-                    cls.load_model(model_name)
-                    logger.info("model_loaded", model=model_name)
-                except Exception as e:
-                    logger.error("model_load_failed", model=model_name, error=str(e))
+            try:
+                cls.load_model(model_name)
+                logger.info("model_loaded", model=model_name)
+            except Exception as e:
+                logger.error("model_load_failed", model=model_name, error=str(e))
     
     @classmethod
     def cleanup(cls):

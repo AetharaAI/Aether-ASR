@@ -117,11 +117,19 @@ async def create_transcription_job(
         webhook_url=webhook_url
     )
     
+    # Premium feature validation based on entitlement tier
+    if api_key.tier != "PRO":
+        if config.word_timestamps or config.diarization_enabled or config.model in ["large-v3", "large-v3-turbo"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Premium features (word timestamps, diarization, 'large' models) require the Aether Audio Pro tier."
+            )
+    
     # Create job record
     job = await create_job(
         job_id=job_id,
-        tenant_id=api_key.tenant_id,
-        api_key_id=api_key.id,
+        tenant_id=str(api_key.tenant_id),
+        api_key_id=None, # Legacy API Keys deprecated
         config=config.model_dump(),
         file_info={
             "original_name": file.filename,

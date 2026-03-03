@@ -4,6 +4,7 @@ import { ArrowUpTrayIcon, DocumentTextIcon, Cog8ToothIcon, PlayIcon, StopIcon, S
 import api from '../services/api';
 import ttsApi from '../services/ttsApi';
 import AudioRecorder from '../components/AudioRecorder';
+import Header from '../components/Header';
 
 export default function AsrDashboard() {
 
@@ -73,9 +74,8 @@ export default function AsrDashboard() {
             formData.append('diarization_enabled', config.diarization_enabled.toString());
 
             // Note: The backend is async, so we'll poll for the result.
-            const res = await api.post('/api/asr', formData, {
-                headers: { 'Content-Type': 'multipart/form-data' }
-            });
+            // Axios will automatically set the correct Content-Type with boundary for FormData
+            const res = await api.post('/api/asr', formData);
 
             const jobId = res.data.id;
 
@@ -196,23 +196,7 @@ export default function AsrDashboard() {
 
     return (
         <div className="min-h-screen bg-[#121212] text-white p-6 md:p-12 font-sans">
-
-            <header className="flex justify-between items-center mb-8 border-b border-gray-800 pb-4">
-                <div className="flex items-center space-x-4">
-                    <img
-                        src="/Aether-Shield-Perceptor-Merged.png"
-                        alt="Aether-ASR Logo"
-                        className="h-12 w-auto object-contain"
-                    />
-                    <div>
-                        <h1 className="text-3xl font-bold tracking-tight text-emerald-400">Aether-ASR Server</h1>
-                        <a href="/docs" className="text-sm text-gray-400 hover:text-emerald-300">API Docs</a>
-                    </div>
-                </div>
-                <div className="flex space-x-4">
-                    {/* Placeholder for future header actions */}
-                </div>
-            </header>
+            <Header />
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
 

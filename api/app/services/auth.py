@@ -1,10 +1,15 @@
 """Authentication services."""
-from fastapi import HTTPException, status, Depends
+from fastapi import HTTPException, status, Depends, Request, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import jwt
 from jwt import PyJWKClient
 import structlog
 from typing import Optional
+from datetime import datetime
+import uuid
+
+from app.config import settings
+from app.services.cache import get_redis_client
 
 logger = structlog.get_logger()
 
@@ -48,55 +53,92 @@ def verify_token(token: str) -> dict:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
-    """Extract and verify the current user from the Bearer token."""
-    if not credentials:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing authorization header"
-        )
-    user_data = verify_token(credentials.credentials)
-    return user_data
+# Entitlement Structures
+class Entitlement:
+    def __init__(self, tier: str, sub: str = None, anon_id: str = None, roles: list = None, remaining_quota: int = -1):
+        self.tier = tier # "ANON", "FREE", "PRO"
+        self.sub = sub
+        self.anon_id = anon_id
+        self.roles = roles or []
+        self.remaining_quota = remaining_quota
+        
+        # Legacy shims
+        self.id = sub or anon_id
+        self.tenant_id = sub or anon_id
 
-async def require_pro_audio(user: dict = Depends(get_current_user)) -> dict:
-    """Dependency that enforces the `pro_audio` realm role as requested by the Unified SaaS Architecture."""
-    realm_access = user.get("realm_access", {})
-    roles = realm_access.get("roles", [])
-    if "pro_audio" not in roles:
-        logger.warning("pro_audio_role_missing", user_id=user.get("sub"))
+async def resolve_entitlement(request: Request, response: Response) -> Entitlement:
+    """Dependency that extracts user state and enforces tiered limits in Redis."""
+    auth_header = request.headers.get("Authorization")
+    user_data = None
+    if auth_header and auth_header.startswith("Bearer "):
+        try:
+            token = auth_header.split(" ")[1]
+            user_data = verify_token(token)
+        except Exception as e:
+            logger.warning("invalid_token_fallback_to_anon", error=str(e))
+            
+    client = await get_redis_client()
+            
+    if user_data:
+        sub = user_data.get("sub")
+        roles = user_data.get("realm_access", {}).get("roles", [])
+        
+        if "pro_audio" in roles:
+            logger.info("entitlement_resolved", tier="PRO", sub=sub)
+            return Entitlement(tier="PRO", sub=sub, roles=roles, remaining_quota=-1) # -1 is unlimited
+        else:
+            # TIER B: FREE (10/day)
+            today = datetime.utcnow().strftime("%Y%m%d")
+            key = f"asr:free:{sub}:{today}"
+            
+            # Use basic get/incr; in prod pipelines we would use lua scripts or increment on success.
+            # Assuming successful API calls.
+            current = await client.get(key)
+            current_int = int(current) if current else 0
+            
+            if current_int >= 10:
+                logger.info("rate_limit_exceeded_free", sub=sub)
+                raise HTTPException(status_code=429, detail="Free tier limit of 10 transcriptions per day reached. Upgrade to Pro.")
+                
+            await client.incr(key)
+            if not current:
+                await client.expire(key, 86400) # 24 hours TTL
+                
+            logger.info("entitlement_resolved", tier="FREE", sub=sub, remaining_quota=10 - current_int - 1)
+            return Entitlement(tier="FREE", sub=sub, roles=roles, remaining_quota=10 - current_int - 1)
+            
+    else:
+        # TIER A: ANON (2 total)
+        anon_id = request.cookies.get("anon_id")
+        if not anon_id:
+            anon_id = str(uuid.uuid4())
+            response.set_cookie(key="anon_id", value=anon_id, max_age=315360000, httponly=True, samesite="lax")
+            
+        key = f"asr:anon:{anon_id}:count"
+        current = await client.get(key)
+        current_int = int(current) if current else 0
+        
+        if current_int >= 2:
+            logger.info("rate_limit_exceeded_anon", anon_id=anon_id)
+            raise HTTPException(status_code=401, detail="Anonymous limit of 2 transcriptions reached. Please sign in to continue.")
+            
+        await client.incr(key)
+        
+        logger.info("entitlement_resolved", tier="ANON", anon_id=anon_id, remaining_quota=2 - current_int - 1)
+        return Entitlement(tier="ANON", anon_id=anon_id, remaining_quota=2 - current_int - 1)
+
+# Utility for routes that strictly require the Pro role
+async def require_pro_audio(entitlement: Entitlement = Depends(resolve_entitlement)) -> Entitlement:
+    if entitlement.tier != "PRO":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="The 'pro_audio' realm role is required for this action."
         )
-    
-    # We map user.sub to id and tenant_id to support legacy dependencies expecting an API Key shape
-    # The ASR models depend on api_key.tenant_id to partition user data.
-    return type("AuthenticatedUser", (), {
-        "id": user.get("sub"),
-        "tenant_id": user.get("sub"),
-        "scopes": roles,
-        "sub": user.get("sub"),
-        "raw_token": user
-    })()
+    return entitlement
 
-# --- Legacy Compatibility Shims ---
-# During transition, we map older auth methods directly to the new `require_pro_audio`.
-async def verify_api_key(user=Depends(require_pro_audio)):
-    return user
+# Legacy compatibility shims
+async def verify_api_key(entitlement: Entitlement = Depends(resolve_entitlement)):
+    return entitlement
 
-async def verify_api_key_optional(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
-    if not credentials:
-        return None
-    try:
-        user = verify_token(credentials.credentials)
-        return type("AuthenticatedUser", (), {
-            "id": user.get("sub"),
-            "tenant_id": user.get("sub"),
-            "scopes": user.get("realm_access", {}).get("roles", [])
-        })()
-    except Exception:
-        return None
-
-async def verify_admin(user=Depends(require_pro_audio)):
-    """Temporarily maps admin to anyone with `pro_audio`, or we can check a `billing-admin` role later."""
-    return user
+async def verify_admin(entitlement: Entitlement = Depends(require_pro_audio)):
+    return entitlement

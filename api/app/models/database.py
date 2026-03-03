@@ -68,7 +68,7 @@ class Job(Base):
     __tablename__ = "jobs"
     
     id = Column(String(32), primary_key=True)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    tenant_id = Column(String(255), nullable=False, index=True)
     api_key_id = Column(UUID(as_uuid=True), ForeignKey("api_keys.id", ondelete="SET NULL"))
     preset_id = Column(UUID(as_uuid=True), ForeignKey("presets.id", ondelete="SET NULL"))
     
@@ -137,7 +137,7 @@ class Preset(Base):
     __tablename__ = "presets"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    tenant_id = Column(String(255), nullable=False, index=True)
     name = Column(String(255), nullable=False)
     description = Column(Text)
     config = Column(JSON, nullable=False)
@@ -159,7 +159,7 @@ class UsageMetering(Base):
     __tablename__ = "usage_metering"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    tenant_id = Column(String(255), nullable=False, index=True)
     api_key_id = Column(UUID(as_uuid=True), ForeignKey("api_keys.id", ondelete="SET NULL"))
     job_id = Column(String(32), ForeignKey("jobs.id", ondelete="SET NULL"))
     
@@ -183,7 +183,7 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="SET NULL"))
+    tenant_id = Column(String(255), index=True)
     api_key_id = Column(UUID(as_uuid=True), ForeignKey("api_keys.id", ondelete="SET NULL"))
     job_id = Column(String(32), ForeignKey("jobs.id", ondelete="SET NULL"))
     

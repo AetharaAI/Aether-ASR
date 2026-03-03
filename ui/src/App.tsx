@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import AsrDashboard from './pages/AsrDashboard';
+import LogoutPage from './pages/LogoutPage';
 import { AuthProvider } from './auth/AuthProvider';
 
 function App() {
@@ -17,6 +18,7 @@ function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<AsrDashboard />} />
+          <Route path="/logout" element={<LogoutPage />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

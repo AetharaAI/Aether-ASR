@@ -102,6 +102,7 @@ services:
 
   # Celery Worker (GPU-enabled)
   worker:
+    user: "0:0"
     build:
       context: ../worker
       dockerfile: Dockerfile

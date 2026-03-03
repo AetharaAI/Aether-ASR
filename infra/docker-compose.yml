@@ -120,8 +120,12 @@ services:
       WHISPER_MODELS_DIR: /models
       WHISPER_PRELOAD_MODELS: "large-v3"
       CUDA_VISIBLE_DEVICES: "2"
+      HF_HOME: /mnt/hf-cache
+      TRANSFORMERS_CACHE: /mnt/hf-cache
+      HF_DATASETS_CACHE: /mnt/hf-cache
     volumes:
       - /mnt/aetherpro/models/audio/whisper:/models
+      - /mnt/aetherpro/hf-cache:/mnt/hf-cache
     deploy:
       resources:
         reservations:

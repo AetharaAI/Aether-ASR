@@ -68,7 +68,7 @@ htmlcov/
 *.pth
 *.ckpt
 *.safetensors
-models/
+/models/
 
 # Temp files
 tmp/

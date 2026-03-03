@@ -1,5 +1,5 @@
 """Authentication services."""
-from fastapi import HTTPException, status, Header, Request
+from fastapi import HTTPException, status, Header, Request, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional
 import hashlib

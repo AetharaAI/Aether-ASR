@@ -1,0 +1,80 @@
+# Fix Aether-ASR Docker Deployment Errors
+
+Two issues are preventing the ASR stack from running on the OVH VM.
+
+## Issue 1: API Container — `ModuleNotFoundError: No module named 'app.models'`
+
+**Root cause**: The [.gitignore](file:///home/cory/Aether-ASR/.gitignore) contains `models/` on line 71. This is intended to exclude ML model weight files (`.bin`, `.pt`, etc.), but the pattern also matches **`api/app/models/`** — the Python package directory containing `schemas.py`, `database.py`, and `__init__.py`.
+
+Since these files are not tracked by git, when the repo is cloned/pulled on the VM, the `api/app/models/` directory is entirely absent. The Docker build's `COPY app/ ./app/` then copies nothing for that subdirectory, so `from app.models.schemas import ...` fails.
+
+**Verified with**:
+- `git check-ignore -v api/app/models/` → `.gitignore:71:models/   api/app/models/`
+- `git ls-files api/app/models/` → (empty — nothing tracked)
+
+## Issue 2: Worker Container — Model Load Permission Denied
+
+The worker logs show:
+```
+Error logging to file "/home/asr/.cache/huggingface/xet/logs/..." (Permission denied (os error 13))
+model_load_failed  error=Data processing error: I/O error: Permission denied (os error 13)
+```
+
+The `asr` user can't write to its HuggingFace cache dir. The models are expected to be at the mounted volume `/models` (mapped from host's `/mnt/aetherpro/models/audio/whisper`), but `faster-whisper` still needs a writable cache directory.
+
+---
+
+## Proposed Changes
+
+### Fix 1: `.gitignore`
+
+#### [MODIFY] [.gitignore](file:///home/cory/Aether-ASR/.gitignore)
+
+Change the `models/` pattern to only match the **root-level** `models/` directory (for ML weights) and not subdirectories like `api/app/models/`:
+
+```diff
+ # Models (large files)
+ *.bin
+ *.pt
+ *.pth
+ *.ckpt
+ *.safetensors
+-models/
++/models/
+```
+
+The leading `/` makes it anchored to the repo root only.
+
+Then force-add the previously ignored files:
+
+```bash
+git add -f api/app/models/
+git commit -m "fix: track api/app/models/ Python package (was git-ignored)"
+git push
+```
+
+### Fix 2: Worker Dockerfile — HuggingFace Cache Permissions
+
+#### [MODIFY] [Dockerfile](file:///home/cory/Aether-ASR/worker/Dockerfile)
+
+Add writable cache directories for the `asr` user before switching to non-root:
+
+```diff
+ # Set ownership
+ RUN chown -R asr:asr /app
++
++# Create writable cache directories for HuggingFace/faster-whisper
++RUN mkdir -p /home/asr/.cache/huggingface && chown -R asr:asr /home/asr
+```
+
+---
+
+## Verification Plan
+
+### On VM (manual — user runs these after pushing)
+
+1. `git pull` on the VM
+2. Verify `api/app/models/` directory exists: `ls -la api/app/models/`
+3. `cd infra && docker compose up --build -d`
+4. `docker compose logs asr-api` — should no longer show `ModuleNotFoundError`
+5. `docker compose logs asr-worker` — should no longer show permission denied for HuggingFace cache

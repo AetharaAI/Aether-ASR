@@ -24,6 +24,7 @@ AUDIO_MAGIC = {
     b"RIFF": "wav",
     b"fLaC": "flac",
     b"OggS": "ogg",
+    b"\x1a\x45\xdf\xa3": "webm",  # WebM/Matroska EBML header
     b"\x00\x00\x00\x1cftypM4A": "m4a",
 }
 
@@ -119,6 +120,10 @@ def _detect_format_by_content(file_bytes: bytes) -> Optional[str]:
     # Check for MP4/M4A
     if file_bytes[4:8] == b"ftyp":
         return "m4a"
+    
+    # Check for WebM/Matroska (EBML header)
+    if file_bytes[0:4] == b"\x1a\x45\xdf\xa3":
+        return "webm"
     
     return None
 

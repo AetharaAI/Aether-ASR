@@ -75,7 +75,7 @@ export default function AsrDashboard() {
 
             // Note: The backend is async, so we'll poll for the result.
             // Axios will automatically set the correct Content-Type with boundary for FormData
-            const res = await api.post('/api/asr', formData);
+            const res = await api.post('/v1/audio/transcriptions', formData);
 
             const jobId = res.data.id;
 
@@ -131,7 +131,7 @@ export default function AsrDashboard() {
             formData.append('word_timestamps', config.word_timestamps.toString());
             formData.append('diarization_enabled', config.diarization_enabled.toString());
 
-            const res = await api.post('/api/asr', formData);
+            const res = await api.post('/v1/audio/transcriptions', formData);
 
             const jobId = res.data.id;
 

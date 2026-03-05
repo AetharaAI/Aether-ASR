@@ -56,6 +56,34 @@ server {
         proxy_connect_timeout 600;
     }
 
+    # === OpenAI-Compatible API Routes ===
+    location /v1/ {
+        limit_req zone=api_limit burst=20 nodelay;
+
+        proxy_pass http://asr_api;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_read_timeout 600;
+        proxy_connect_timeout 600;
+        client_max_body_size 200M;
+    }
+
+    # === Billing Routes ===
+    location /billing/ {
+        proxy_pass http://asr_api;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
     # === Upload Endpoint ===
     location /upload/ {
         limit_req zone=upload_limit burst=5 nodelay;

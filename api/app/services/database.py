@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import uuid
 
 from app.config import settings
-from app.models.database import Base, Tenant, APIKey, Job, JobEvent, Artifact, Preset
+from app.models.database import Base, Job, JobEvent, Artifact, Preset
 
 
 # Database engine
@@ -22,56 +22,9 @@ async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit
 
 
 async def init_db():
-    """Initialize database tables and seed default data."""
+    """Initialize database tables."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        
-    async with async_session() as session:
-        # Check if default tenant exists
-        result = await session.execute(select(Tenant).where(Tenant.slug == 'default'))
-        tenant = result.scalar_one_or_none()
-        
-        if not tenant:
-            tenant_id = uuid.UUID('00000000-0000-0000-0000-000000000001')
-            tenant = Tenant(
-                id=tenant_id,
-                name='Default Tenant',
-                slug='default',
-                config={
-                    "default_model": "base",
-                    "default_compute_type": "float16",
-                    "max_file_size_mb": 500,
-                    "max_duration_seconds": 7200,
-                    "default_retention_days": 7,
-                    "allowed_models": ["tiny", "base", "small", "medium", "large-v3"],
-                    "features": {
-                        "vad_enabled": True,
-                        "diarization_enabled": False,
-                        "word_timestamps": True
-                    }
-                },
-                limits={
-                    "requests_per_minute": 60,
-                    "requests_per_hour": 1000,
-                    "audio_seconds_per_day": 86400,
-                    "concurrent_jobs": 5
-                },
-                is_active=True
-            )
-            session.add(tenant)
-            
-            # Create default API key
-            api_key = APIKey(
-                id=uuid.UUID('00000000-0000-0000-0000-000000000002'),
-                tenant_id=tenant_id,
-                key_hash='a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3',  # hash of '123'
-                key_prefix='test-key',
-                name='Default API Key',
-                scopes='["transcription:read", "transcription:write"]',
-                is_active=True
-            )
-            session.add(api_key)
-            await session.commit()
 
 
 async def check_database() -> bool:
@@ -84,27 +37,11 @@ async def check_database() -> bool:
         return False
 
 
-# API Key operations
-async def get_api_key_by_hash(key_hash: str) -> Optional[APIKey]:
-    """Get API key by hash."""
-    async with async_session() as session:
-        result = await session.execute(
-            select(APIKey).where(
-                and_(
-                    APIKey.key_hash == key_hash,
-                    APIKey.is_active == True,
-                    APIKey.is_revoked == False
-                )
-            )
-        )
-        return result.scalar_one_or_none()
-
-
 # Job operations
 async def create_job(
     job_id: str,
-    tenant_id: uuid.UUID,
-    api_key_id: Optional[uuid.UUID],
+    tenant_id: str,
+    api_key_id: Optional[str],
     config: dict,
     file_info: dict,
     webhook_url: Optional[str] = None,
@@ -117,7 +54,7 @@ async def create_job(
         
         job = Job(
             id=job_id,
-            tenant_id=tenant_id,
+            tenant_id=tenant_id or "open",
             api_key_id=api_key_id,
             preset_id=preset_id,
             config=config,
@@ -160,7 +97,7 @@ async def get_job(job_id: str) -> Optional[Job]:
 
 
 async def list_jobs(
-    tenant_id: uuid.UUID,
+    tenant_id: str = "open",
     status: Optional[str] = None,
     limit: int = 20,
     offset: int = 0,
@@ -169,7 +106,7 @@ async def list_jobs(
     """List jobs with pagination."""
     async with async_session() as session:
         # Build query
-        query = select(Job).where(Job.tenant_id == tenant_id)
+        query = select(Job)
         
         if status:
             query = query.where(Job.status == status)
@@ -182,9 +119,7 @@ async def list_jobs(
         query = query.order_by(sort_field)
         
         # Count total
-        count_result = await session.execute(
-            select(Job).where(Job.tenant_id == tenant_id)
-        )
+        count_result = await session.execute(select(Job))
         total = len(count_result.scalars().all())
         
         # Paginate
@@ -252,21 +187,20 @@ async def get_job_artifacts(job_id: str) -> List[Artifact]:
 
 
 async def record_usage(
-    tenant_id: uuid.UUID,
-    api_key_id: Optional[uuid.UUID],
-    job_id: str,
-    audio_seconds: float,
-    audio_bytes: int,
-    model: str,
-    features: dict
+    tenant_id: str = "open",
+    api_key_id: Optional[str] = None,
+    job_id: str = "",
+    audio_seconds: float = 0,
+    audio_bytes: int = 0,
+    model: str = "",
+    features: dict = {}
 ):
-    """Record usage for billing."""
+    """Record usage for metering."""
     from app.models.database import UsageMetering
     
     async with async_session() as session:
         usage = UsageMetering(
-            tenant_id=tenant_id,
-            api_key_id=api_key_id,
+            tenant_id=tenant_id or "open",
             job_id=job_id,
             audio_seconds=audio_seconds,
             audio_bytes=audio_bytes,

@@ -6,9 +6,6 @@ const API_BASE_URL = import.meta.env?.VITE_API_URL || '';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
 });
 
 export const jobsApi = {
@@ -27,9 +24,7 @@ export const jobsApi = {
     formData.append('output_format', config.output_format);
     formData.append('retention_days', String(config.retention_days));
 
-    const response = await api.post('/api/transcriptions', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
+    const response = await api.post('/api/transcriptions', formData);
     return response.data;
   },
 

@@ -131,9 +131,7 @@ export default function AsrDashboard() {
             formData.append('word_timestamps', config.word_timestamps.toString());
             formData.append('diarization_enabled', config.diarization_enabled.toString());
 
-            const res = await api.post('/api/asr', formData, {
-                headers: { 'Content-Type': 'multipart/form-data' }
-            });
+            const res = await api.post('/api/asr', formData);
 
             const jobId = res.data.id;
 

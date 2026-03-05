@@ -1,9 +1,8 @@
 """Model information endpoints."""
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from typing import List
 
 from app.models.schemas import ModelsResponse, ModelInfo
-from app.services.auth import verify_api_key_optional
 
 
 router = APIRouter()
@@ -109,8 +108,6 @@ AVAILABLE_MODELS = [
 
 
 @router.get("/models", response_model=ModelsResponse)
-async def list_models(
-    api_key=Depends(verify_api_key_optional)
-):
+async def list_models():
     """List available models and their capabilities."""
     return ModelsResponse(models=AVAILABLE_MODELS)

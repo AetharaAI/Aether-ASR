@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import {
     ArrowUpTrayIcon, DocumentTextIcon, Cog8ToothIcon, PlayIcon,
@@ -10,6 +10,8 @@ import ttsApi from '../services/ttsApi';
 import AudioRecorder from '../components/AudioRecorder';
 import Header from '../components/Header';
 import TtsPanel from '../components/TtsPanel';
+import WaveformVisualizer from '../components/WaveformVisualizer';
+import PipelineFlow from '../components/PipelineFlow';
 
 type StudioTab = 'asr' | 'tts' | 'workflow';
 
@@ -20,7 +22,10 @@ export default function AsrDashboard() {
     const [file, setFile] = useState<File | null>(null);
     const [isGenerating, setIsGenerating] = useState(false);
     const [transcript, setTranscript] = useState('');
+    const [displayedTranscript, setDisplayedTranscript] = useState('');
+    const [isTyping, setIsTyping] = useState(false);
     const [inputMode, setInputMode] = useState<'upload' | 'record'>('upload');
+    const transcriptStartTime = useRef<number>(0);
 
     const [config, setConfig] = useState({
         model: 'base',
@@ -43,22 +48,18 @@ export default function AsrDashboard() {
     const [ttsAudioUrl, setTtsAudioUrl] = useState<string | null>(null);
 
     useEffect(() => {
-        // Fetch available models
         api.get('/api/models').then(res => {
             if (res.data && res.data.models) {
                 setAvailableModels(res.data.models.map((m: any) => m.id || m.name || m));
             }
         }).catch(() => { });
 
-        // Check ASR health
         api.get('/api/health').then(() => setAsrHealth('healthy')).catch(() => setAsrHealth('degraded'));
 
-        // Check TTS health
         ttsApi.getTtsHealth().then(data => {
             setTtsHealth(data.status === 'healthy' ? 'healthy' : 'degraded');
         }).catch(() => setTtsHealth('degraded'));
 
-        // Fetch TTS voices
         ttsApi.getPredefinedVoices().then(voices => {
             if (voices && voices.length > 0) {
                 const filenames = voices.map(v => v.filename);
@@ -67,6 +68,29 @@ export default function AsrDashboard() {
             }
         });
     }, []);
+
+    // Typewriter effect
+    useEffect(() => {
+        if (!transcript || isGenerating) {
+            setDisplayedTranscript('');
+            return;
+        }
+        setIsTyping(true);
+        setDisplayedTranscript('');
+        let i = 0;
+        const chunkSize = Math.max(1, Math.floor(transcript.length / 100)); // show in ~100 steps
+        const timer = setInterval(() => {
+            i += chunkSize;
+            if (i >= transcript.length) {
+                setDisplayedTranscript(transcript);
+                setIsTyping(false);
+                clearInterval(timer);
+            } else {
+                setDisplayedTranscript(transcript.slice(0, i));
+            }
+        }, 20);
+        return () => clearInterval(timer);
+    }, [transcript, isGenerating]);
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
@@ -77,7 +101,9 @@ export default function AsrDashboard() {
     const submitTranscription = async (audioFile: File) => {
         setIsGenerating(true);
         setTranscript('');
+        setDisplayedTranscript('');
         setTtsAudioUrl(null);
+        transcriptStartTime.current = Date.now();
         toast('Uploading and transcribing...', { icon: '⏳' });
 
         try {
@@ -91,15 +117,15 @@ export default function AsrDashboard() {
 
             const res = await api.post('/v1/audio/transcriptions', formData);
 
-            // Check if sync response (has text directly)
             if (res.data.text && !res.data.job_id) {
                 setIsGenerating(false);
                 setTranscript(res.data.text);
-                toast.success("Transcription complete!");
+                const elapsed = ((Date.now() - transcriptStartTime.current) / 1000).toFixed(1);
+                const wordCount = res.data.text.split(/\s+/).length;
+                toast.success(`Transcription complete • ${wordCount} words • ${elapsed}s`);
                 return;
             }
 
-            // Async job — poll for completion
             const jobId = res.data.job_id || res.data.id;
             const pollInterval = setInterval(async () => {
                 try {
@@ -107,8 +133,11 @@ export default function AsrDashboard() {
                     if (statusRes.data.status === 'completed') {
                         clearInterval(pollInterval);
                         setIsGenerating(false);
-                        setTranscript(statusRes.data.result?.text || statusRes.data.text || '');
-                        toast.success("Transcription complete!");
+                        const text = statusRes.data.result?.text || statusRes.data.text || '';
+                        setTranscript(text);
+                        const elapsed = ((Date.now() - transcriptStartTime.current) / 1000).toFixed(1);
+                        const wordCount = text.split(/\s+/).length;
+                        toast.success(`ASR complete • ${wordCount} words • ${elapsed}s • ${config.model}`);
                     } else if (statusRes.data.status === 'failed') {
                         clearInterval(pollInterval);
                         setIsGenerating(false);
@@ -150,7 +179,7 @@ export default function AsrDashboard() {
             });
             const url = URL.createObjectURL(blob);
             setTtsAudioUrl(url);
-            toast.success("Speech synthesis complete!");
+            toast.success("Voice synthesis complete!");
         } catch {
             toast.error("TTS generation failed.");
         } finally {
@@ -164,10 +193,12 @@ export default function AsrDashboard() {
 
     const HealthBadge = ({ status, label }: { status: string; label: string }) => (
         <div className="flex items-center space-x-1.5">
-            <div className={`w-2 h-2 rounded-full ${status === 'healthy' ? 'bg-emerald-400 shadow-[0_0_6px_rgba(16,185,129,0.6)]' :
-                status === 'degraded' ? 'bg-yellow-400 shadow-[0_0_6px_rgba(234,179,8,0.6)]' :
-                    'bg-gray-500 animate-pulse'
-                }`} />
+            <div className={`w-2 h-2 rounded-full transition-all duration-500 ${status === 'healthy' ? 'bg-emerald-400 health-pulse' :
+                    status === 'degraded' ? 'bg-yellow-400 health-pulse' :
+                        'bg-gray-500 animate-pulse'
+                }`}
+                style={{ color: status === 'healthy' ? '#34d399' : status === 'degraded' ? '#facc15' : '#6b7280' }}
+            />
             <span className="text-xs text-gray-500">{label}</span>
         </div>
     );
@@ -293,7 +324,7 @@ export default function AsrDashboard() {
                             {inputMode === 'upload' ? (
                                 <>
                                     <div className="flex items-center justify-center w-full">
-                                        <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-gray-700 border-dashed rounded-lg cursor-pointer bg-[#2a2a2a] hover:bg-[#333] transition-colors">
+                                        <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-gray-700 border-dashed rounded-lg cursor-pointer bg-[#2a2a2a] hover:bg-[#333] hover:border-emerald-600/40 transition-all">
                                             <div className="flex flex-col items-center justify-center pt-5 pb-6">
                                                 <ArrowUpTrayIcon className="w-8 h-8 mb-3 text-gray-400" />
                                                 <p className="mb-2 text-sm text-gray-400"><span className="font-semibold">Click to upload</span> or drag and drop</p>
@@ -303,7 +334,7 @@ export default function AsrDashboard() {
                                         </label>
                                     </div>
                                     {file && (
-                                        <div className="mt-4 p-3 bg-emerald-900/30 border border-emerald-800 rounded text-sm text-emerald-200">
+                                        <div className="mt-4 p-3 bg-emerald-900/30 border border-emerald-800 rounded text-sm text-emerald-200 animate-fade-in-up">
                                             Selected: {file.name}
                                         </div>
                                     )}
@@ -312,7 +343,7 @@ export default function AsrDashboard() {
                                         disabled={isGenerating || !file}
                                         className={`w-full mt-6 py-3 rounded-lg font-bold flex items-center justify-center transition-all ${isGenerating || !file
                                             ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                                            : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)]'
+                                            : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] hover:shadow-[0_0_25px_rgba(16,185,129,0.6)]'
                                             }`}
                                     >
                                         {isGenerating ? (
@@ -356,12 +387,25 @@ export default function AsrDashboard() {
                             <div className="flex-1 bg-[#0a0a0a] border border-gray-800 rounded-lg overflow-hidden flex flex-col">
                                 <div className="flex-1 p-5 overflow-y-auto font-mono text-sm leading-relaxed text-gray-300">
                                     {isGenerating ? (
-                                        <div className="flex flex-col items-center justify-center h-full text-gray-500 min-h-[300px]">
-                                            <div className="w-10 h-10 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mb-4" />
-                                            Processing your audio through Faster-Whisper...
+                                        <div className="flex flex-col items-center justify-center h-full min-h-[300px]">
+                                            <WaveformVisualizer
+                                                color="emerald"
+                                                barCount={28}
+                                                statusMessages={[
+                                                    'Initializing ASR Engine...',
+                                                    `Loading ${config.model} model...`,
+                                                    'Analyzing audio waveform...',
+                                                    'Detecting speech segments...',
+                                                    'Decoding language patterns...',
+                                                    'Processing with Faster-Whisper...',
+                                                ]}
+                                            />
                                         </div>
-                                    ) : transcript ? (
-                                        <div className="whitespace-pre-wrap">{transcript}</div>
+                                    ) : displayedTranscript ? (
+                                        <div className="whitespace-pre-wrap animate-fade-in-up">
+                                            {displayedTranscript}
+                                            {isTyping && <span className="typewriter-cursor" />}
+                                        </div>
                                     ) : (
                                         <div className="flex items-center justify-center h-full text-gray-600 min-h-[300px]">
                                             Transcribed text will appear here.
@@ -386,13 +430,18 @@ export default function AsrDashboard() {
                                         </div>
                                         <div className="flex items-center space-x-3 w-full sm:w-auto justify-end">
                                             {ttsAudioUrl && <audio controls src={ttsAudioUrl} className="h-8 max-w-[200px]" />}
-                                            <button
-                                                onClick={handleSendToTTS}
-                                                disabled={isGeneratingTTS}
-                                                className="bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-600/50 px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center justify-center disabled:opacity-50"
-                                            >
-                                                {isGeneratingTTS ? <span className="animate-pulse">Synthesizing...</span> : 'Send to Voice'}
-                                            </button>
+                                            {isGeneratingTTS ? (
+                                                <div className="flex items-center space-x-2">
+                                                    <WaveformVisualizer color="blue" barCount={12} compact statusMessages={['Synthesizing voice...']} />
+                                                </div>
+                                            ) : (
+                                                <button
+                                                    onClick={handleSendToTTS}
+                                                    className="bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-600/50 px-4 py-1.5 rounded-md text-sm font-medium transition-all hover:shadow-[0_0_10px_rgba(16,185,129,0.3)] flex items-center justify-center"
+                                                >
+                                                    Send to Voice
+                                                </button>
+                                            )}
                                         </div>
                                     </div>
                                 )}
@@ -411,64 +460,15 @@ export default function AsrDashboard() {
 
             {/* ─────────── WORKFLOW TAB ─────────── */}
             {activeTab === 'workflow' && (
-                <div className="max-w-4xl mx-auto">
-                    <div className="bg-[#1e1e1e] rounded-xl p-8 border border-gray-800 shadow-lg text-center">
-                        <ArrowPathIcon className="w-16 h-16 mx-auto text-purple-400 mb-6" />
-                        <h2 className="text-2xl font-bold mb-3">
-                            Audio <span className="text-purple-400">Pipeline</span>
-                        </h2>
-                        <p className="text-gray-400 max-w-xl mx-auto mb-8">
-                            Transcribe audio → Edit the text → Synthesize new speech.
-                            Start by transcribing audio in the ASR tab, then send it to TTS.
-                        </p>
-
-                        <div className="flex items-center justify-center space-x-4">
-                            <div className="flex flex-col items-center">
-                                <div className={`w-12 h-12 rounded-full flex items-center justify-center ${transcript ? 'bg-emerald-600/20 border-emerald-500/50' : 'bg-gray-800 border-gray-700'} border`}>
-                                    <MicrophoneIcon className={`w-6 h-6 ${transcript ? 'text-emerald-400' : 'text-gray-600'}`} />
-                                </div>
-                                <span className="text-xs text-gray-500 mt-2">Transcribe</span>
-                            </div>
-
-                            <div className={`w-12 h-0.5 ${transcript ? 'bg-emerald-500' : 'bg-gray-700'}`} />
-
-                            <div className="flex flex-col items-center">
-                                <div className={`w-12 h-12 rounded-full flex items-center justify-center ${transcript ? 'bg-blue-600/20 border-blue-500/50' : 'bg-gray-800 border-gray-700'} border`}>
-                                    <DocumentTextIcon className={`w-6 h-6 ${transcript ? 'text-blue-400' : 'text-gray-600'}`} />
-                                </div>
-                                <span className="text-xs text-gray-500 mt-2">Edit</span>
-                            </div>
-
-                            <div className="w-12 h-0.5 bg-gray-700" />
-
-                            <div className="flex flex-col items-center">
-                                <div className="w-12 h-12 rounded-full flex items-center justify-center bg-gray-800 border border-gray-700">
-                                    <SpeakerWaveIcon className="w-6 h-6 text-gray-600" />
-                                </div>
-                                <span className="text-xs text-gray-500 mt-2">Synthesize</span>
-                            </div>
-                        </div>
-
-                        {transcript ? (
-                            <div className="mt-8 flex justify-center space-x-4">
-                                <button
-                                    onClick={() => setActiveTab('tts')}
-                                    className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg font-medium transition-colors shadow-[0_0_15px_rgba(59,130,246,0.3)]"
-                                >
-                                    Continue to Synthesize →
-                                </button>
-                            </div>
-                        ) : (
-                            <div className="mt-8">
-                                <button
-                                    onClick={() => setActiveTab('asr')}
-                                    className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2 rounded-lg font-medium transition-colors shadow-[0_0_15px_rgba(16,185,129,0.3)]"
-                                >
-                                    Start with Transcription
-                                </button>
-                            </div>
-                        )}
-                    </div>
+                <div className="max-w-xl mx-auto">
+                    <PipelineFlow
+                        hasTranscript={!!transcript}
+                        hasAudio={!!ttsAudioUrl}
+                        isTranscribing={isGenerating}
+                        isSynthesizing={isGeneratingTTS}
+                        onGoToASR={() => setActiveTab('asr')}
+                        onGoToTTS={() => setActiveTab('tts')}
+                    />
                 </div>
             )}
         </div>

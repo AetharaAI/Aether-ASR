@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { SpeakerWaveIcon, PlayIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline';
 import ttsApi, { TtsVoice } from '../services/ttsApi';
+import WaveformVisualizer from './WaveformVisualizer';
 
 interface TtsPanelProps {
     initialText?: string;
@@ -52,7 +53,7 @@ export default function TtsPanel({ initialText = '' }: TtsPanelProps) {
 
             const url = URL.createObjectURL(blob);
             setAudioUrl(url);
-            toast.success("Speech synthesis complete!");
+            toast.success(`Voice ready • ${selectedVoice.replace('.wav', '')}`);
         } catch (error) {
             console.error(error);
             toast.error("TTS generation failed.");
@@ -172,20 +173,32 @@ export default function TtsPanel({ initialText = '' }: TtsPanelProps) {
                     </div>
                 )}
 
+                {/* Waveform during synthesis */}
+                {isGenerating && (
+                    <div className="mt-6 p-4 bg-[#0a0a0a] border border-gray-800 rounded-lg">
+                        <WaveformVisualizer
+                            color="blue"
+                            barCount={20}
+                            statusMessages={[
+                                `Generating ${selectedVoice.replace('.wav', '')}...`,
+                                'Synthesizing speech patterns...',
+                                'Encoding audio waveform...',
+                            ]}
+                        />
+                    </div>
+                )}
+
                 {/* Generate Button */}
                 <button
                     onClick={handleGenerate}
                     disabled={isGenerating || !text.trim()}
                     className={`w-full mt-6 py-3 rounded-lg font-bold flex items-center justify-center transition-all ${isGenerating || !text.trim()
-                            ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                            : 'bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_15px_rgba(59,130,246,0.4)]'
+                        ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                        : 'bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_15px_rgba(59,130,246,0.4)] hover:shadow-[0_0_25px_rgba(59,130,246,0.6)]'
                         }`}
                 >
                     {isGenerating ? (
-                        <>
-                            <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" />
-                            Synthesizing...
-                        </>
+                        <><SpeakerWaveIcon className="w-5 h-5 mr-2 animate-pulse" /> Synthesizing...</>
                     ) : (
                         <><PlayIcon className="w-5 h-5 mr-2" /> Generate Speech</>
                     )}
@@ -194,7 +207,7 @@ export default function TtsPanel({ initialText = '' }: TtsPanelProps) {
 
             {/* Audio Player */}
             {audioUrl && (
-                <div className="bg-[#1e1e1e] rounded-xl p-6 border border-gray-800 shadow-lg">
+                <div className="bg-[#1e1e1e] rounded-xl p-6 border border-gray-800 shadow-lg animate-fade-in-up">
                     <h3 className="text-lg font-semibold mb-4 flex items-center text-blue-400">
                         <SpeakerWaveIcon className="w-5 h-5 mr-2" /> Generated Audio
                     </h3>

@@ -1,11 +1,10 @@
 """Industrial transcription endpoints."""
-from fastapi import APIRouter, File, UploadFile, Form, Depends, HTTPException, status, Query
+from fastapi import APIRouter, File, UploadFile, Form, HTTPException, status, Query
 from fastapi.responses import StreamingResponse, FileResponse
 from typing import Optional, Literal, List
 import json
 
 from app.models.schemas import JobResponse, JobListResponse, TranscriptionConfig
-from app.services.auth import verify_api_key
 from app.services.storage import upload_file, download_artifact
 from app.services.queue import enqueue_job, cancel_job
 from app.services.database import (
@@ -73,7 +72,6 @@ async def create_transcription_job(
     output_format: Literal["json", "srt", "vtt", "txt"] = Form("json"),
     retention_days: int = Form(7),
     webhook_url: Optional[str] = Form(None),
-    api_key: str = Depends(verify_api_key)
 ):
     """Create an async transcription job."""
     # Validate file
@@ -117,19 +115,11 @@ async def create_transcription_job(
         webhook_url=webhook_url
     )
     
-    # Premium feature validation based on entitlement tier
-    if api_key.tier != "PRO":
-        if config.word_timestamps or config.diarization_enabled or config.model in ["large-v3", "large-v3-turbo"]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Premium features (word timestamps, diarization, 'large' models) require the Aether Audio Pro tier."
-            )
-    
     # Create job record
     job = await create_job(
         job_id=job_id,
-        tenant_id=str(api_key.tenant_id),
-        api_key_id=None, # Legacy API Keys deprecated
+        tenant_id="open",
+        api_key_id=None,
         config=config.model_dump(),
         file_info={
             "original_name": file.filename,
@@ -155,11 +145,10 @@ async def list_transcription_jobs(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     sort: str = Query("-created_at"),
-    api_key: str = Depends(verify_api_key)
 ):
     """List transcription jobs with pagination."""
     jobs, total = await list_jobs(
-        tenant_id=api_key.tenant_id,
+        tenant_id="open",
         status=status,
         limit=limit,
         offset=offset,
@@ -182,7 +171,6 @@ async def list_transcription_jobs(
 @router.get("/transcriptions/{job_id}", response_model=JobResponse)
 async def get_transcription_job(
     job_id: str,
-    api_key: str = Depends(verify_api_key)
 ):
     """Get job status and results."""
     job = await get_job(job_id)
@@ -194,18 +182,6 @@ async def get_transcription_job(
                 "error": {
                     "code": "NOT_FOUND",
                     "message": f"Job {job_id} not found"
-                }
-            }
-        )
-    
-    # Check tenant access
-    if job.tenant_id != api_key.tenant_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "error": {
-                    "code": "FORBIDDEN",
-                    "message": "Access denied"
                 }
             }
         )
@@ -224,7 +200,6 @@ async def get_transcription_job(
 @router.post("/transcriptions/{job_id}/cancel")
 async def cancel_transcription_job(
     job_id: str,
-    api_key: str = Depends(verify_api_key)
 ):
     """Cancel a pending or processing job."""
     job = await get_job(job_id)
@@ -236,17 +211,6 @@ async def cancel_transcription_job(
                 "error": {
                     "code": "NOT_FOUND",
                     "message": f"Job {job_id} not found"
-                }
-            }
-        )
-    
-    if job.tenant_id != api_key.tenant_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "error": {
-                    "code": "FORBIDDEN",
-                    "message": "Access denied"
                 }
             }
         )
@@ -279,7 +243,6 @@ async def cancel_transcription_job(
 async def download_transcript(
     job_id: str,
     format: Literal["json", "srt", "vtt", "txt"] = Query("json"),
-    api_key: str = Depends(verify_api_key)
 ):
     """Download transcript in specified format."""
     job = await get_job(job_id)
@@ -291,17 +254,6 @@ async def download_transcript(
                 "error": {
                     "code": "NOT_FOUND",
                     "message": f"Job {job_id} not found"
-                }
-            }
-        )
-    
-    if job.tenant_id != api_key.tenant_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "error": {
-                    "code": "FORBIDDEN",
-                    "message": "Access denied"
                 }
             }
         )
@@ -350,7 +302,6 @@ async def download_transcript(
 @router.get("/transcriptions/{job_id}/events")
 async def job_events_stream(
     job_id: str,
-    api_key: str = Depends(verify_api_key)
 ):
     """Server-sent events for job progress."""
     job = await get_job(job_id)
@@ -362,17 +313,6 @@ async def job_events_stream(
                 "error": {
                     "code": "NOT_FOUND",
                     "message": f"Job {job_id} not found"
-                }
-            }
-        )
-    
-    if job.tenant_id != api_key.tenant_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "error": {
-                    "code": "FORBIDDEN",
-                    "message": "Access denied"
                 }
             }
         )

@@ -1,4 +1,4 @@
-import axios, { AxiosError } from 'axios';
+import axios from 'axios';
 import { Job, TranscriptionConfig, ModelInfo, Preset } from '../types';
 
 // @ts-ignore
@@ -10,41 +10,6 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
 });
-
-const getOidcToken = () => {
-  try {
-    const oidcStorage = localStorage.getItem('oidc.user:https://passport.aetherpro.us/realms/aetherpro:aether-asr');
-    if (oidcStorage) {
-      const user = JSON.parse(oidcStorage);
-      return user.access_token;
-    }
-  } catch (e) {
-    console.error("Failed to parse OIDC token from storage", e);
-  }
-  return null;
-};
-
-// Add OIDC Token to requests
-api.interceptors.request.use((config) => {
-  const token = getOidcToken();
-  if (token) {
-    config.headers['Authorization'] = `Bearer ${token}`;
-  }
-  return config;
-});
-
-// Handle errors
-api.interceptors.response.use(
-  (response) => response,
-  (error: AxiosError) => {
-    if (error.response?.status === 401) {
-      // Token may be invalid/expired, let react-oidc-context handle refresh or login
-      localStorage.removeItem('oidc.user:https://passport.aetherpro.us/realms/aetherpro:aether-asr');
-      window.location.href = '/';
-    }
-    return Promise.reject(error);
-  }
-);
 
 export const jobsApi = {
   createJob: async (file: File, config: TranscriptionConfig): Promise<Job> => {

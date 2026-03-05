@@ -1,12 +1,11 @@
 """WebSocket streaming endpoint."""
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from fastapi.responses import HTMLResponse
 import base64
 import json
 import asyncio
 
 from app.models.schemas import WebSocketMessage
-from app.services.auth import verify_api_key
 
 
 router = APIRouter()
@@ -15,18 +14,10 @@ router = APIRouter()
 @router.websocket("/ws/transcribe")
 async def websocket_transcribe(
     websocket: WebSocket,
-    api_key: str = Query(...),
     model: str = Query("base"),
     language: str = Query("auto")
 ):
     """WebSocket endpoint for real-time streaming transcription."""
-    # Verify API key
-    try:
-        key_obj = await verify_api_key(api_key)
-    except HTTPException:
-        await websocket.close(code=1008, reason="Invalid API key")
-        return
-    
     await websocket.accept()
     
     # Configuration
@@ -116,7 +107,6 @@ async def websocket_test_page():
     <body>
         <h1>ASR WebSocket Test</h1>
         <div>
-            <input type="text" id="apiKey" placeholder="API Key" />
             <button onclick="connect()">Connect</button>
             <button onclick="disconnect()">Disconnect</button>
         </div>
@@ -132,8 +122,7 @@ async def websocket_test_page():
             let mediaRecorder = null;
             
             function connect() {
-                const apiKey = document.getElementById('apiKey').value;
-                ws = new WebSocket(`wss://${window.location.host}/ws/transcribe?api_key=${apiKey}&model=base`);
+                ws = new WebSocket(`wss://${window.location.host}/ws/transcribe?model=base`);
                 
                 ws.onopen = () => {
                     document.getElementById('status').textContent = 'Connected';

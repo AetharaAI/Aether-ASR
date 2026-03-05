@@ -1,19 +1,16 @@
 """Account and user state endpoints."""
-from fastapi import APIRouter, Depends
-from typing import Optional
-
-from app.services.auth import resolve_entitlement, Entitlement
+from fastapi import APIRouter
 
 router = APIRouter()
 
 @router.get("/whoami")
-async def whoami(entitlement: Entitlement = Depends(resolve_entitlement)):
-    """Return the current user's entitlement and tier information."""
+async def whoami():
+    """Return open-access status — no auth required."""
     return {
-        "authenticated": entitlement.tier != "ANON",
-        "sub": entitlement.sub,
-        "anon_id": entitlement.anon_id,
-        "roles": entitlement.roles,
-        "tier": entitlement.tier,
-        "remaining_quota": entitlement.remaining_quota
+        "authenticated": False,
+        "sub": None,
+        "anon_id": None,
+        "roles": ["pro_audio"],
+        "tier": "OPEN",
+        "remaining_quota": -1
     }

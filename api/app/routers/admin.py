@@ -1,17 +1,12 @@
 """Admin endpoints."""
-from fastapi import APIRouter, Depends, HTTPException, status
-from typing import Optional
-
-from app.services.auth import verify_admin
+from fastapi import APIRouter
 
 
 router = APIRouter()
 
 
 @router.get("/stats")
-async def get_stats(
-    admin=Depends(verify_admin)
-):
+async def get_stats():
     """Get service statistics."""
     # This would query the database for actual stats
     return {
@@ -36,7 +31,6 @@ async def get_stats(
 @router.get("/jobs/pending")
 async def get_pending_jobs(
     limit: int = 100,
-    admin=Depends(verify_admin)
 ):
     """Get pending jobs for monitoring."""
     return {
@@ -48,7 +42,6 @@ async def get_pending_jobs(
 @router.post("/jobs/{job_id}/retry")
 async def retry_job(
     job_id: str,
-    admin=Depends(verify_admin)
 ):
     """Retry a failed job."""
     return {
@@ -57,9 +50,7 @@ async def retry_job(
 
 
 @router.delete("/cache")
-async def clear_cache(
-    admin=Depends(verify_admin)
-):
+async def clear_cache():
     """Clear Redis cache."""
     from app.services.cache import clear_all_cache
     await clear_all_cache()

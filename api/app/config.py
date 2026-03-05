@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     JWT_EXPIRATION_HOURS: int = 24
     
     # Rate Limiting
-    RATE_LIMIT_ENABLED: bool = True
+    RATE_LIMIT_ENABLED: bool = False
     RATE_LIMIT_REQUESTS_PER_MINUTE: int = 60
     RATE_LIMIT_REQUESTS_PER_HOUR: int = 1000
     
@@ -84,16 +84,6 @@ class Settings(BaseSettings):
     LOG_FORMAT: str = "json"
     METRICS_ENABLED: bool = True
     TRACING_ENABLED: bool = False
-    
-    # Billing & Identity
-    STRIPE_SECRET_KEY: str = ""
-    STRIPE_WEBHOOK_SECRET: str = ""
-    PRO_TIER_PRICE_ID: str = ""
-    STRIPE_SUCCESS_URL: str = "https://asr.aetherpro.us/billing/success"
-    STRIPE_CANCEL_URL: str = "https://asr.aetherpro.us/billing/cancel"
-    PASSPORT_CLIENT_ID: str = "billing-service"
-    PASSPORT_CLIENT_SECRET: str = ""
-    PASSPORT_ADMIN_URL: str = "https://passport.aetherpro.us/admin/realms/aetherpro"
     
     class Config:
         env_file = ".env"

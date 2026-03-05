@@ -1,5 +1,5 @@
 """OpenAI-compatible endpoints."""
-from fastapi import APIRouter, File, UploadFile, Form, Depends, HTTPException, status
+from fastapi import APIRouter, File, UploadFile, Form, HTTPException, status
 from fastapi.responses import PlainTextResponse
 from typing import Optional, Literal
 import tempfile
@@ -9,7 +9,6 @@ from app.models.schemas import (
     OpenAITranscriptionResponse, 
     OpenAIVerboseTranscriptionResponse
 )
-from app.services.auth import verify_api_key
 from app.services.storage import upload_file
 from app.services.queue import enqueue_job
 from app.services.database import create_job, get_job
@@ -41,7 +40,6 @@ async def create_transcription(
     response_format: Literal["json", "text", "srt", "verbose_json", "vtt"] = Form("json"),
     temperature: float = Form(0.0),
     timestamp_granularities: Optional[str] = Form(None),
-    api_key: str = Depends(verify_api_key)
 ):
     """
     OpenAI-compatible transcription endpoint.
@@ -92,8 +90,8 @@ async def create_transcription(
         
         await create_job(
             job_id=job_id,
-            tenant_id=api_key.tenant_id,
-            api_key_id=api_key.id,
+            tenant_id="open",
+            api_key_id=None,
             config=config,
             file_info={
                 "original_name": file.filename,
@@ -122,7 +120,6 @@ async def create_translation(
     prompt: Optional[str] = Form(None),
     response_format: Literal["json", "text", "srt", "verbose_json", "vtt"] = Form("json"),
     temperature: float = Form(0.0),
-    api_key: str = Depends(verify_api_key)
 ):
     """OpenAI-compatible translation endpoint (translates to English)."""
     # Similar to transcription but forces language to English

@@ -1,63 +1,68 @@
-import axios from 'axios';
+import api from './api';
 
-// @ts-ignore - Vite specific env vars
-const TTS_BASE_URL = import.meta.env?.VITE_TTS_URL || 'https://tts.aetherpro.us';
-
-const ttsApiClient = axios.create({
-    baseURL: TTS_BASE_URL,
-});
-
-const getOidcToken = () => {
-    try {
-        const oidcStorage = localStorage.getItem('oidc.user:https://passport.aetherpro.us/realms/aetherpro:aether-asr');
-        if (oidcStorage) {
-            const user = JSON.parse(oidcStorage);
-            return user.access_token;
-        }
-    } catch (e) {
-        console.error("Failed to parse OIDC token from storage", e);
-    }
-    return null;
-};
-
-ttsApiClient.interceptors.request.use((config) => {
-    const token = getOidcToken();
-    if (token) {
-        config.headers['Authorization'] = `Bearer ${token}`;
-    }
-    return config;
-});
-
-export const getPredefinedVoices = async () => {
-    try {
-        const response = await ttsApiClient.get('/get_predefined_voices');
-        return response.data.voices || [];
-    } catch (error) {
-        console.error("Failed to fetch TTS voices:", error);
-        return [];
-    }
-};
+export interface TtsVoice {
+    name: string;
+    filename: string;
+}
 
 export interface TtsRequestParams {
     text: string;
     voice_mode?: 'predefined' | 'clone';
     predefined_voice_id?: string;
     output_format?: 'wav' | 'mp3' | 'opus';
+    temperature?: number;
+    exaggeration?: number;
+    speed_factor?: number;
+    seed?: number;
 }
 
-export const generateTTS = async (params: TtsRequestParams) => {
+export const getPredefinedVoices = async (): Promise<TtsVoice[]> => {
     try {
-        const response = await ttsApiClient.post('/tts', params, {
-            responseType: 'blob' // Important: Expect audio blob back
-        });
-        return response.data; // This will be the Blob
+        const response = await api.get('/api/tts/voices');
+        // The upstream returns an array of objects with name/filename
+        const data = response.data;
+        if (Array.isArray(data)) {
+            return data.map((v: any) => ({
+                name: v.name || v.filename || v,
+                filename: v.filename || v.name || v,
+            }));
+        }
+        return [];
     } catch (error) {
-        console.error("Failed to generate TTS:", error);
-        throw error;
+        console.error("Failed to fetch TTS voices:", error);
+        return [];
     }
+};
+
+export const getTtsModelInfo = async () => {
+    try {
+        const response = await api.get('/api/tts/model-info');
+        return response.data;
+    } catch (error) {
+        console.error("Failed to fetch TTS model info:", error);
+        return null;
+    }
+};
+
+export const getTtsHealth = async () => {
+    try {
+        const response = await api.get('/api/tts/health');
+        return response.data;
+    } catch (error) {
+        return { status: 'unreachable' };
+    }
+};
+
+export const generateTTS = async (params: TtsRequestParams): Promise<Blob> => {
+    const response = await api.post('/api/tts/speech', params, {
+        responseType: 'blob'
+    });
+    return response.data;
 };
 
 export default {
     getPredefinedVoices,
+    getTtsModelInfo,
+    getTtsHealth,
     generateTTS,
 };

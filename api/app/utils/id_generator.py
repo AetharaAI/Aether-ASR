@@ -1,12 +1,12 @@
 """ID generation utilities."""
-import ulid
+import uuid
 
 
 def generate_job_id() -> str:
-    """Generate a unique job ID."""
-    return f"job_{ulid.new().str.lower()}"
+    """Generate a unique job ID using UUID4."""
+    return f"job_{uuid.uuid4().hex}"
 
 
 def generate_ulid() -> str:
-    """Generate a ULID."""
-    return ulid.new().str.lower()
+    """Generate a unique ID using UUID4."""
+    return uuid.uuid4().hex

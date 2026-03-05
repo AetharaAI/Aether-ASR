@@ -85,6 +85,12 @@ class Settings(BaseSettings):
     METRICS_ENABLED: bool = True
     TRACING_ENABLED: bool = False
     
+    # TTS Upstream (Chatterbox)
+    TTS_BASE_URL: str = "https://tts.aetherpro.us"
+    TTS_API_KEY: str = ""
+    TTS_MODEL: str = "chatterbox"
+    TTS_TIMEOUT_SECONDS: int = 120
+    
     class Config:
         env_file = ".env"
         case_sensitive = True

@@ -3,7 +3,7 @@ import toast from 'react-hot-toast';
 import {
     ArrowUpTrayIcon, DocumentTextIcon, Cog8ToothIcon, PlayIcon,
     StopIcon, SpeakerWaveIcon, MicrophoneIcon, DocumentArrowUpIcon,
-    ArrowPathIcon, SignalIcon
+    ArrowPathIcon
 } from '@heroicons/react/24/outline';
 import api from '../services/api';
 import ttsApi from '../services/ttsApi';
@@ -165,8 +165,8 @@ export default function AsrDashboard() {
     const HealthBadge = ({ status, label }: { status: string; label: string }) => (
         <div className="flex items-center space-x-1.5">
             <div className={`w-2 h-2 rounded-full ${status === 'healthy' ? 'bg-emerald-400 shadow-[0_0_6px_rgba(16,185,129,0.6)]' :
-                    status === 'degraded' ? 'bg-yellow-400 shadow-[0_0_6px_rgba(234,179,8,0.6)]' :
-                        'bg-gray-500 animate-pulse'
+                status === 'degraded' ? 'bg-yellow-400 shadow-[0_0_6px_rgba(234,179,8,0.6)]' :
+                    'bg-gray-500 animate-pulse'
                 }`} />
             <span className="text-xs text-gray-500">{label}</span>
         </div>
@@ -199,8 +199,8 @@ export default function AsrDashboard() {
                                 key={tab.id}
                                 onClick={() => setActiveTab(tab.id)}
                                 className={`flex items-center px-5 py-2.5 rounded-lg text-sm font-medium transition-all border border-transparent ${isActive
-                                        ? colorMap[tab.color]
-                                        : 'text-gray-500 hover:text-gray-300 hover:bg-[#2a2a2a]'
+                                    ? colorMap[tab.color]
+                                    : 'text-gray-500 hover:text-gray-300 hover:bg-[#2a2a2a]'
                                     }`}
                             >
                                 <Icon className="w-4 h-4 mr-2" />
@@ -311,8 +311,8 @@ export default function AsrDashboard() {
                                         onClick={handleGenerate}
                                         disabled={isGenerating || !file}
                                         className={`w-full mt-6 py-3 rounded-lg font-bold flex items-center justify-center transition-all ${isGenerating || !file
-                                                ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                                                : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)]'
+                                            ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                                            : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)]'
                                             }`}
                                     >
                                         {isGenerating ? (

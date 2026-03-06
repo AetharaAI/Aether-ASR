@@ -40,7 +40,6 @@ export default function LiveTranscriber({ onTranscriptUpdate, apiBaseUrl = '' }:
     const sessionTimeoutRef = useRef<number | null>(null);
 
     const TARGET_SR = 16000;
-    const CHUNK_MS = 100; // send audio every 100ms (~1600 samples at 16kHz)
     const BUFFER_SIZE = 4096;
     const VLLM_MODEL = 'mistralai/Voxtral-Mini-4B-Realtime-2602';
 
@@ -265,10 +264,10 @@ export default function LiveTranscriber({ onTranscriptUpdate, apiBaseUrl = '' }:
                     onClick={isListening ? stopListening : startListening}
                     disabled={status === 'connecting' || status === 'finishing'}
                     className={`w-16 h-16 rounded-full flex items-center justify-center transition-all disabled:opacity-60 disabled:cursor-not-allowed ${isListening
-                            ? 'bg-red-600 hover:bg-red-500 shadow-[0_0_20px_rgba(220,38,38,0.6)] animate-pulse'
-                            : status === 'error'
-                                ? 'bg-orange-600 hover:bg-orange-500 shadow-[0_0_15px_rgba(234,88,12,0.4)]'
-                                : 'bg-purple-600 hover:bg-purple-500 shadow-[0_0_15px_rgba(147,51,234,0.3)] hover:shadow-[0_0_25px_rgba(147,51,234,0.55)]'
+                        ? 'bg-red-600 hover:bg-red-500 shadow-[0_0_20px_rgba(220,38,38,0.6)] animate-pulse'
+                        : status === 'error'
+                            ? 'bg-orange-600 hover:bg-orange-500 shadow-[0_0_15px_rgba(234,88,12,0.4)]'
+                            : 'bg-purple-600 hover:bg-purple-500 shadow-[0_0_15px_rgba(147,51,234,0.3)] hover:shadow-[0_0_25px_rgba(147,51,234,0.55)]'
                         }`}
                 >
                     {isListening
@@ -279,8 +278,8 @@ export default function LiveTranscriber({ onTranscriptUpdate, apiBaseUrl = '' }:
 
                 {/* Status label */}
                 <div className={`mt-3 text-center text-sm font-mono ${status === 'streaming' ? 'text-purple-400 text-lg font-bold tracking-wider' :
-                        status === 'error' ? 'text-orange-400' :
-                            'text-gray-400'
+                    status === 'error' ? 'text-orange-400' :
+                        'text-gray-400'
                     }`}>
                     {statusLabel}
                 </div>

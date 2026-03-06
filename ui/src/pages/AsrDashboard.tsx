@@ -8,7 +8,14 @@ import {
     ArrowPathIcon
 } from '@heroicons/react/24/outline';
 import api from '../services/api';
-import ttsApi from '../services/ttsApi';
+import {
+    getPredefinedVoices as ttsGetVoices,
+    getReferenceFiles as ttsGetReferenceFiles,
+    getTtsModelInfo as ttsGetModelInfo,
+    getTtsHealth as ttsGetHealth,
+    generateTTS as ttsGenerate,
+    uploadReferenceAudio as ttsUploadReference,
+} from '../services/ttsApi';
 import type { TtsRequestParams } from '../services/ttsApi';
 import AudioRecorder from '../components/AudioRecorder';
 import Header from '../components/Header';
@@ -92,19 +99,19 @@ export default function AsrDashboard() {
             setVoxtralHealth(res.data.status === 'healthy' ? 'healthy' : 'degraded');
         }).catch(() => setVoxtralHealth('degraded'));
 
-        ttsApi.getTtsHealth().then(data => {
+        ttsGetHealth().then((data: any) => {
             setTtsHealth(data.status === 'healthy' ? 'healthy' : 'degraded');
         }).catch(() => setTtsHealth('degraded'));
 
         // Load TTS voices and reference files
-        ttsApi.getPredefinedVoices().then(voices => {
+        ttsGetVoices().then((voices: any) => {
             if (voices && voices.length > 0) {
                 setTtsVoices(voices);
                 setSelectedVoice(voices[0].filename);
             }
         });
 
-        ttsApi.getReferenceFiles().then(files => {
+        ttsGetReferenceFiles().then((files: any) => {
             if (files && files.length > 0) {
                 setReferenceFiles(files);
                 setSelectedReference(files[0]);
@@ -112,7 +119,7 @@ export default function AsrDashboard() {
         });
 
         // Load model info for tag support detection
-        ttsApi.getTtsModelInfo().then(info => {
+        ttsGetModelInfo().then((info: any) => {
             if (info) setTtsModelInfo(info);
         });
     }, []);
@@ -270,7 +277,7 @@ export default function AsrDashboard() {
         }
 
         try {
-            const blob = await ttsApi.generateTTS(params);
+            const blob = await ttsGenerate(params);
             const url = URL.createObjectURL(blob);
             setTtsAudioUrl(url);
             const elapsed = ((Date.now() - genStart) / 1000).toFixed(1);
@@ -292,10 +299,10 @@ export default function AsrDashboard() {
         if (!e.target.files || e.target.files.length === 0) return;
         const files = Array.from(e.target.files);
         try {
-            await ttsApi.uploadReferenceAudio(files);
+            await ttsUploadReference(files);
             toast.success(`Uploaded ${files.length} reference file(s)`);
             // Refresh reference files list
-            const updated = await ttsApi.getReferenceFiles();
+            const updated = await ttsGetReferenceFiles();
             setReferenceFiles(updated);
             if (updated.length > 0 && !selectedReference) setSelectedReference(updated[0]);
         } catch {

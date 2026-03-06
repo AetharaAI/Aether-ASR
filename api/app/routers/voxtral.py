@@ -1,15 +1,30 @@
-"""Voxtral Realtime ASR proxy — routes requests to the vLLM sidecar."""
+"""Voxtral Realtime ASR proxy — routes requests to the vLLM sidecar.
+
+Voxtral uses vLLM's /v1/realtime WebSocket API, not the HTTP transcription API.
+This router handles:
+  - File upload transcription (converts to PCM16, streams via WebSocket)
+  - Health check
+  - Model listing
+  - WebSocket proxy for client-side streaming
+"""
 from fastapi import APIRouter, File, UploadFile, Form, HTTPException, WebSocket
 from typing import Optional
 import httpx
-import base64
 import asyncio
 import json
+import base64
+import io
+import struct
+import numpy as np
 
 from app.config import settings
 
 
 router = APIRouter()
+
+VLLM_MODEL = "mistralai/Voxtral-Mini-4B-Realtime-2602"
+TARGET_SR = 16000
+CHUNK_DURATION_MS = 480
 
 
 @router.get("/voxtral/health")
@@ -43,6 +58,24 @@ async def voxtral_models():
         raise HTTPException(status_code=502, detail=f"Voxtral vLLM unreachable: {e}")
 
 
+def _audio_bytes_to_pcm16(file_bytes: bytes, filename: str) -> bytes:
+    """Convert uploaded audio file to 16kHz PCM16 bytes using pydub."""
+    from pydub import AudioSegment
+    
+    # Detect format from extension
+    ext = (filename or "audio.wav").rsplit(".", 1)[-1].lower()
+    format_map = {"wav": "wav", "mp3": "mp3", "m4a": "m4a", "webm": "webm", 
+                  "ogg": "ogg", "flac": "flac", "opus": "ogg"}
+    fmt = format_map.get(ext, "wav")
+    
+    audio = AudioSegment.from_file(io.BytesIO(file_bytes), format=fmt)
+    
+    # Convert to mono, 16kHz, 16-bit PCM
+    audio = audio.set_channels(1).set_frame_rate(TARGET_SR).set_sample_width(2)
+    
+    return audio.raw_data
+
+
 @router.post("/voxtral/transcribe")
 async def voxtral_transcribe(
     file: UploadFile = File(...),
@@ -50,48 +83,100 @@ async def voxtral_transcribe(
     temperature: float = Form(0.0),
 ):
     """
-    Transcribe audio via Voxtral Realtime (vLLM).
+    Transcribe audio via Voxtral Realtime (vLLM WebSocket).
     
-    Reads the uploaded audio file and sends it to the vLLM OpenAI-compatible
-    transcription endpoint.
+    Accepts an uploaded audio file, converts it to PCM16 16kHz, 
+    then streams it through vLLM's /v1/realtime WebSocket to get
+    the transcript back.
     """
     if not settings.VOXTRAL_ENABLED:
         raise HTTPException(status_code=503, detail="Voxtral engine is disabled")
     
     file_bytes = await file.read()
     
+    # Convert to PCM16 16kHz
     try:
-        # vLLM's OpenAI-compatible audio transcription endpoint
-        async with httpx.AsyncClient(timeout=settings.VOXTRAL_TIMEOUT_SECONDS) as client:
-            files_payload = {
-                "file": (file.filename or "audio.wav", file_bytes, file.content_type or "audio/wav"),
-            }
-            data_payload = {
-                "model": "mistralai/Voxtral-Mini-4B-Realtime-2602",
-                "temperature": str(temperature),
-            }
-            if language:
-                data_payload["language"] = language
-            
-            resp = await client.post(
-                f"{settings.VOXTRAL_BASE_URL}/v1/audio/transcriptions",
-                files=files_payload,
-                data=data_payload,
-            )
-            
-            if resp.status_code != 200:
-                error_detail = resp.text
-                raise HTTPException(
-                    status_code=resp.status_code,
-                    detail=f"Voxtral transcription failed: {error_detail}"
-                )
-            
-            return resp.json()
+        pcm_bytes = _audio_bytes_to_pcm16(file_bytes, file.filename or "audio.wav")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Audio conversion failed: {e}")
     
-    except httpx.TimeoutException:
+    # Stream via WebSocket to vLLM
+    import aiohttp
+    
+    vllm_ws_url = settings.VOXTRAL_BASE_URL.replace("http://", "ws://").replace("https://", "wss://")
+    ws_url = f"{vllm_ws_url}/v1/realtime"
+    
+    chunk_samples = int(TARGET_SR * CHUNK_DURATION_MS / 1000)
+    chunk_bytes_size = chunk_samples * 2  # 16-bit = 2 bytes per sample
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.ws_connect(ws_url, timeout=aiohttp.ClientWSCloseTimeout(ws_close=30)) as ws:
+                # Send session config
+                await ws.send_json({
+                    "type": "session.update",
+                    "session": {
+                        "model": VLLM_MODEL,
+                        "input_audio_format": "pcm16",
+                        "input_audio_transcription": {
+                            "model": VLLM_MODEL,
+                        },
+                        "turn_detection": None,
+                        "temperature": temperature,
+                    },
+                })
+                
+                # Stream audio in chunks
+                offset = 0
+                while offset < len(pcm_bytes):
+                    chunk = pcm_bytes[offset:offset + chunk_bytes_size]
+                    await ws.send_json({
+                        "type": "input_audio_buffer.append",
+                        "audio": base64.b64encode(chunk).decode("ascii"),
+                    })
+                    offset += chunk_bytes_size
+                    await asyncio.sleep(0.01)
+                
+                # Signal end of input
+                await ws.send_json({
+                    "type": "input_audio_buffer.commit",
+                })
+                
+                # Collect response
+                full_text = ""
+                async for msg in ws:
+                    if msg.type == aiohttp.WSMsgType.TEXT:
+                        event = json.loads(msg.data)
+                        event_type = event.get("type", "")
+                        
+                        if event_type == "response.audio_transcript.delta":
+                            delta = event.get("delta", "")
+                            full_text += delta
+                        
+                        elif event_type == "response.audio_transcript.done":
+                            transcript = event.get("transcript", full_text)
+                            return {"text": transcript.strip()}
+                        
+                        elif event_type == "response.done":
+                            break
+                        
+                        elif event_type == "error":
+                            error_msg = event.get("error", {}).get("message", "unknown")
+                            raise HTTPException(status_code=500, detail=f"Voxtral error: {error_msg}")
+                    
+                    elif msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.ERROR):
+                        break
+                
+                # If we got here via response.done without audio_transcript.done
+                if full_text.strip():
+                    return {"text": full_text.strip()}
+                
+                return {"text": ""}
+    
+    except aiohttp.ClientError as e:
+        raise HTTPException(status_code=502, detail=f"Cannot connect to Voxtral vLLM: {e}")
+    except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="Voxtral transcription timed out")
-    except httpx.ConnectError:
-        raise HTTPException(status_code=502, detail="Cannot connect to Voxtral vLLM service")
 
 
 @router.websocket("/voxtral/realtime")
@@ -108,35 +193,35 @@ async def voxtral_realtime(websocket: WebSocket):
         await websocket.close(code=1013, reason="Voxtral engine is disabled")
         return
     
-    import websockets
+    import aiohttp
     
     vllm_ws_url = settings.VOXTRAL_BASE_URL.replace("http://", "ws://").replace("https://", "wss://")
-    vllm_ws_url = f"{vllm_ws_url}/v1/realtime"
+    ws_url = f"{vllm_ws_url}/v1/realtime"
     
     try:
-        async with websockets.connect(vllm_ws_url) as vllm_ws:
-            async def forward_to_vllm():
-                """Forward client messages to vLLM."""
-                try:
-                    while True:
-                        data = await websocket.receive_bytes()
-                        await vllm_ws.send(data)
-                except Exception:
-                    pass
-            
-            async def forward_to_client():
-                """Forward vLLM responses to client."""
-                try:
-                    async for message in vllm_ws:
-                        if isinstance(message, bytes):
-                            await websocket.send_bytes(message)
-                        else:
-                            await websocket.send_text(message)
-                except Exception:
-                    pass
-            
-            # Run both directions concurrently
-            await asyncio.gather(forward_to_vllm(), forward_to_client())
+        async with aiohttp.ClientSession() as session:
+            async with session.ws_connect(ws_url) as vllm_ws:
+                async def forward_to_vllm():
+                    """Forward client messages to vLLM."""
+                    try:
+                        while True:
+                            data = await websocket.receive_text()
+                            await vllm_ws.send_str(data)
+                    except Exception:
+                        pass
+                
+                async def forward_to_client():
+                    """Forward vLLM responses to client."""
+                    try:
+                        async for msg in vllm_ws:
+                            if msg.type == aiohttp.WSMsgType.TEXT:
+                                await websocket.send_text(msg.data)
+                            elif msg.type == aiohttp.WSMsgType.BINARY:
+                                await websocket.send_bytes(msg.data)
+                    except Exception:
+                        pass
+                
+                await asyncio.gather(forward_to_vllm(), forward_to_client())
     
     except Exception as e:
         await websocket.close(code=1011, reason=f"vLLM connection failed: {str(e)[:100]}")

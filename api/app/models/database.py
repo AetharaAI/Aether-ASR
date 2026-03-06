@@ -28,7 +28,7 @@ class Job(Base):
     
     id = Column(String(32), primary_key=True)
     tenant_id = Column(String(255), nullable=False, index=True, default="open")
-    api_key_id = Column(String(255), nullable=True)
+    api_key_id = Column(UUID(as_uuid=True), nullable=True)
     preset_id = Column(UUID(as_uuid=True), ForeignKey("presets.id", ondelete="SET NULL"))
     
     status = Column(SQLEnum(JobStatusEnum), nullable=False, default=JobStatusEnum.PENDING)

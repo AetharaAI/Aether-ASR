@@ -111,7 +111,7 @@ async def voxtral_transcribe(
     
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.ws_connect(ws_url, timeout=aiohttp.ClientWSCloseTimeout(ws_close=60)) as ws:
+            async with session.ws_connect(ws_url, timeout=aiohttp.ClientTimeout(total=60)) as ws:
                 # Wait for session.created from server
                 init_msg = await ws.receive_json()
                 if init_msg.get("type") != "session.created":

@@ -132,14 +132,15 @@ class JobResponse(BaseModel):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     estimated_completion: Optional[datetime] = None
-    # Renamed from `file` → `file_info` to match the ORM column
     file_info: Optional[Dict[str, Any]] = None
     config: Optional[Dict[str, Any]] = None
     progress: Optional[Dict[str, Any]] = None
     result: Optional[Dict[str, Any]] = None
     error: Optional[Dict[str, Any]] = None
     usage: Optional[Dict[str, Any]] = None
-    artifacts: Optional[Dict[str, str]] = None
+    # artifacts is a SQLAlchemy relationship → list of Artifact ORM objects
+    # Use List[Any] so Pydantic doesn't try to coerce it to a dict
+    artifacts: Optional[List[Any]] = None
 
 
 class JobListResponse(BaseModel):

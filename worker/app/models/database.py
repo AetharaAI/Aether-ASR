@@ -1,6 +1,10 @@
-"""SQLAlchemy database models for worker (synchronous version)."""
+"""SQLAlchemy database models for worker (synchronous, no-tenant version).
+
+These models MUST match the actual DB schema created by the API container.
+Removed stale multi-tenant FK constraints (tenants, api_keys tables don't exist).
+"""
 from sqlalchemy import (
-    Column, String, DateTime, Boolean, JSON, Integer, 
+    Column, String, DateTime, Boolean, JSON, Integer,
     Float, ForeignKey, Text, Enum
 )
 from sqlalchemy.dialects.postgresql import UUID, INET
@@ -24,12 +28,14 @@ class JobStatusEnum(str, enum.Enum):
 
 class Job(Base):
     __tablename__ = "jobs"
-    
+
     id = Column(String(32), primary_key=True)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
-    api_key_id = Column(UUID(as_uuid=True), ForeignKey("api_keys.id", ondelete="SET NULL"))
-    preset_id = Column(UUID(as_uuid=True), ForeignKey("presets.id", ondelete="SET NULL"))
-    
+    # Simple string — no FK to tenants (table doesn't exist in this deployment)
+    tenant_id = Column(String(255), nullable=False, index=True, default="open")
+    # Optional UUID, no FK to api_keys
+    api_key_id = Column(UUID(as_uuid=True), nullable=True)
+    preset_id = Column(UUID(as_uuid=True), ForeignKey("presets.id", ondelete="SET NULL"), nullable=True)
+
     status = Column(Enum(JobStatusEnum), nullable=False, default=JobStatusEnum.PENDING)
     config = Column(JSON, nullable=False, default=dict)
     file_info = Column(JSON, nullable=False, default=dict)
@@ -37,15 +43,15 @@ class Job(Base):
     result = Column(JSON)
     error = Column(JSON)
     usage = Column(JSON)
-    
+
     retention_until = Column(DateTime(timezone=True))
     webhook_url = Column(String(2048))
     webhook_delivered_at = Column(DateTime(timezone=True))
     webhook_attempts = Column(Integer, default=0)
-    
+
     client_ip = Column(INET)
     user_agent = Column(Text)
-    
+
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     started_at = Column(DateTime(timezone=True))
     completed_at = Column(DateTime(timezone=True))
@@ -56,7 +62,7 @@ class Job(Base):
 
 class JobEvent(Base):
     __tablename__ = "job_events"
-    
+
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     job_id = Column(String(32), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
     event_type = Column(String(50), nullable=False)
@@ -66,23 +72,37 @@ class JobEvent(Base):
 
 class UsageMetering(Base):
     __tablename__ = "usage_metering"
-    
+
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
-    api_key_id = Column(UUID(as_uuid=True), ForeignKey("api_keys.id", ondelete="SET NULL"))
+    # Simple string — no FK to tenants
+    tenant_id = Column(String(255), nullable=False, index=True, default="open")
+    api_key_id = Column(UUID(as_uuid=True), nullable=True)
     job_id = Column(String(32), ForeignKey("jobs.id", ondelete="SET NULL"))
-    
+
     audio_seconds = Column(Float, nullable=False)
     audio_bytes = Column(Integer, nullable=False)
     model = Column(String(50), nullable=False)
     features = Column(JSON, nullable=False, default=dict)
     cost_estimate = Column(Float)
     cost_currency = Column(String(3), default="USD")
-    
+
     recorded_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     period_hour = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     period_day = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     period_month = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    
+
     region = Column(String(50))
     worker_id = Column(String(100))
+
+
+class Preset(Base):
+    __tablename__ = "presets"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(String(255), nullable=False, index=True, default="open")
+    name = Column(String(255), nullable=False)
+    description = Column(Text)
+    config = Column(JSON, nullable=False)
+    is_default = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)

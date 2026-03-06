@@ -4,10 +4,14 @@ export interface Job {
   created_at: string;
   started_at?: string;
   completed_at?: string;
-  file: {
-    original_name: string;
-    size_bytes: number;
+  file_info?: {
+    original_name?: string;
+    storage_key?: string;
+    size_bytes?: number;
     duration_seconds?: number;
+    format?: string;
+    sample_rate?: number;
+    channels?: number;
   };
   config: TranscriptionConfig;
   progress: {

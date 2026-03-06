@@ -1,6 +1,7 @@
 """Database operations."""
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy import select, update, and_
+from sqlalchemy.orm import flag_modified
 from typing import Optional, List, Tuple
 from datetime import datetime, timedelta
 import uuid
@@ -47,11 +48,14 @@ async def create_job(
     webhook_url: Optional[str] = None,
     preset_id: Optional[uuid.UUID] = None
 ) -> Job:
-    """Create a new job."""
+    """Create a new job and its initial event in a single session."""
     async with async_session() as session:
         retention_days = config.get("retention_days", 7)
-        retention_until = datetime.utcnow() + timedelta(days=retention_days) if retention_days > 0 else None
-        
+        retention_until = (
+            datetime.utcnow() + timedelta(days=retention_days)
+            if retention_days > 0 else None
+        )
+
         job = Job(
             id=job_id,
             tenant_id=tenant_id or "open",
@@ -70,20 +74,20 @@ async def create_job(
                 "message": "Waiting in queue"
             }
         )
-        
         session.add(job)
-        await session.commit()
-        await session.refresh(job)
-        
-        # Add job event
+
+        # Add initial event in the same transaction so we don't get
+        # detached-instance errors from a second session open.
         event = JobEvent(
             job_id=job_id,
             event_type="created",
             data={"config": config, "file_info": file_info}
         )
         session.add(event)
+
         await session.commit()
-        
+        await session.refresh(job)
+
         return job
 
 
@@ -107,26 +111,30 @@ async def list_jobs(
     async with async_session() as session:
         # Build query
         query = select(Job)
-        
+
         if status:
             query = query.where(Job.status == status)
-        
+
         # Sort
         if sort.startswith("-"):
             sort_field = getattr(Job, sort[1:]).desc()
         else:
             sort_field = getattr(Job, sort).asc()
         query = query.order_by(sort_field)
-        
-        # Count total
-        count_result = await session.execute(select(Job))
-        total = len(count_result.scalars().all())
-        
+
+        # Count total (efficient approach)
+        from sqlalchemy import func
+        count_query = select(func.count()).select_from(Job)
+        if status:
+            count_query = count_query.where(Job.status == status)
+        count_result = await session.execute(count_query)
+        total = count_result.scalar()
+
         # Paginate
         query = query.offset(offset).limit(limit)
         result = await session.execute(query)
         jobs = result.scalars().all()
-        
+
         return jobs, total
 
 
@@ -137,35 +145,42 @@ async def update_job_status(
     result: Optional[dict] = None,
     error: Optional[dict] = None
 ) -> Job:
-    """Update job status."""
+    """Update job status with proper JSON mutation tracking."""
     async with async_session() as session:
         job = await session.get(Job, job_id)
         if not job:
             raise ValueError(f"Job {job_id} not found")
-        
+
         job.status = status
-        
+
         if progress:
-            job.progress.update(progress)
-        
+            # Merge progress dict (don't replace entirely)
+            current_progress = dict(job.progress or {})
+            current_progress.update(progress)
+            job.progress = current_progress
+            # Tell SQLAlchemy the JSON column was mutated
+            flag_modified(job, "progress")
+
         if result:
             job.result = result
+            flag_modified(job, "result")
             job.completed_at = datetime.utcnow()
-        
+
         if error:
             job.error = error
+            flag_modified(job, "error")
             job.failed_at = datetime.utcnow()
-        
+
         if status == "processing" and not job.started_at:
             job.started_at = datetime.utcnow()
-        
+
         if status == "cancelled":
             job.cancelled_at = datetime.utcnow()
-        
+
         await session.commit()
         await session.refresh(job)
-        
-        # Add event
+
+        # Add event in the same session
         event = JobEvent(
             job_id=job_id,
             event_type=status,
@@ -173,7 +188,7 @@ async def update_job_status(
         )
         session.add(event)
         await session.commit()
-        
+
         return job
 
 
@@ -197,7 +212,7 @@ async def record_usage(
 ):
     """Record usage for metering."""
     from app.models.database import UsageMetering
-    
+
     async with async_session() as session:
         usage = UsageMetering(
             tenant_id=tenant_id or "open",

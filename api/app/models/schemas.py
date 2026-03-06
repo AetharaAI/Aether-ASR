@@ -1,5 +1,5 @@
 """Pydantic schemas for API requests and responses."""
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime
 from enum import Enum
@@ -45,6 +45,8 @@ class TranscriptionConfig(BaseModel):
     webhook_url: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
 
+    model_config = ConfigDict(from_attributes=True)
+
 
 class FileInfo(BaseModel):
     original_name: Optional[str] = None
@@ -55,6 +57,8 @@ class FileInfo(BaseModel):
     sample_rate: Optional[int] = None
     channels: Optional[int] = None
 
+    model_config = ConfigDict(from_attributes=True)
+
 
 class ProgressInfo(BaseModel):
     percent: int = 0
@@ -64,12 +68,16 @@ class ProgressInfo(BaseModel):
     chunks_total: int = 0
     message: str = "Waiting in queue"
 
+    model_config = ConfigDict(from_attributes=True)
+
 
 class UsageInfo(BaseModel):
     audio_seconds: float
     audio_bytes: int
     model: str
     compute_type: str
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class WordTimestamp(BaseModel):
@@ -107,22 +115,36 @@ class ErrorInfo(BaseModel):
 
 
 class JobResponse(BaseModel):
+    """
+    ORM-backed response for a transcription job.
+
+    Field names match the SQLAlchemy Job column names exactly so that
+    Pydantic can read them directly via from_attributes=True:
+      - file_info  (was: file)  matches  Job.file_info
+      - config                  matches  Job.config
+      - progress               matches  Job.progress
+    """
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     status: JobStatus
     created_at: datetime
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     estimated_completion: Optional[datetime] = None
-    file: FileInfo
-    config: TranscriptionConfig
-    progress: ProgressInfo
-    result: Optional[TranscriptionResult] = None
-    error: Optional[ErrorInfo] = None
-    usage: Optional[UsageInfo] = None
+    # Renamed from `file` → `file_info` to match the ORM column
+    file_info: Optional[Dict[str, Any]] = None
+    config: Optional[Dict[str, Any]] = None
+    progress: Optional[Dict[str, Any]] = None
+    result: Optional[Dict[str, Any]] = None
+    error: Optional[Dict[str, Any]] = None
+    usage: Optional[Dict[str, Any]] = None
     artifacts: Optional[Dict[str, str]] = None
 
 
 class JobListResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     items: List[JobResponse]
     pagination: Dict[str, Any]
 

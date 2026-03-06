@@ -125,10 +125,13 @@ services:
       - asr-network
     restart: unless-stopped
 
-  # Voxtral Realtime ASR (vLLM)
+  # Voxtral Realtime ASR (vLLM nightly — required for voxtral_realtime arch)
   voxtral:
-    image: vllm/vllm-openai:latest
+    build:
+      context: ./voxtral
+      dockerfile: Dockerfile
     container_name: asr-voxtral
+    entrypoint: [ "python", "-m", "vllm.entrypoints.openai.api_server" ]
     command:
       - --model
       - /models/mistralai/Voxtral-Mini-4B-Realtime-2602

@@ -48,33 +48,27 @@ export default function LiveTranscriber({ onTranscriptUpdate, apiBaseUrl = '' }:
         wsRef.current = ws;
 
         ws.onopen = () => {
-            // Send session config
-            ws.send(JSON.stringify({
-                type: 'session.update',
-                session: {
-                    model: 'mistralai/Voxtral-Mini-4B-Realtime-2602',
-                    input_audio_format: 'pcm16',
-                    input_audio_transcription: {
-                        model: 'mistralai/Voxtral-Mini-4B-Realtime-2602',
-                    },
-                    turn_detection: null,
-                    temperature: 0.0,
-                },
-            }));
-
-            // Start audio processing
-            setupAudioPipeline(stream, ws);
+            // Wait for session.created, it arrives as the first message
+            // We handle it in onmessage below
         };
 
         ws.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
-                if (data.type === 'response.audio_transcript.delta') {
+                if (data.type === 'session.created') {
+                    // Now send session.update with model (flat format per current vLLM docs)
+                    ws.send(JSON.stringify({
+                        type: 'session.update',
+                        model: 'mistralai/Voxtral-Mini-4B-Realtime-2602',
+                    }));
+                    // Start audio pipeline after session is configured
+                    setupAudioPipeline(stream, ws);
+                } else if (data.type === 'transcription.delta') {
                     fullTextRef.current += data.delta || '';
                     setLiveText(fullTextRef.current);
                     onTranscriptUpdate(fullTextRef.current);
-                } else if (data.type === 'response.audio_transcript.done') {
-                    const finalText = data.transcript || fullTextRef.current;
+                } else if (data.type === 'transcription.done') {
+                    const finalText = data.text || fullTextRef.current;
                     fullTextRef.current = finalText;
                     setLiveText(finalText);
                     onTranscriptUpdate(finalText);

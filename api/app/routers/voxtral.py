@@ -111,19 +111,16 @@ async def voxtral_transcribe(
     
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.ws_connect(ws_url, timeout=aiohttp.ClientWSCloseTimeout(ws_close=30)) as ws:
-                # Send session config
+            async with session.ws_connect(ws_url, timeout=aiohttp.ClientWSCloseTimeout(ws_close=60)) as ws:
+                # Wait for session.created from server
+                init_msg = await ws.receive_json()
+                if init_msg.get("type") != "session.created":
+                    raise HTTPException(status_code=502, detail=f"Expected session.created, got: {init_msg.get('type')}")
+                
+                # Send session config (flat format per current vLLM docs)
                 await ws.send_json({
                     "type": "session.update",
-                    "session": {
-                        "model": VLLM_MODEL,
-                        "input_audio_format": "pcm16",
-                        "input_audio_transcription": {
-                            "model": VLLM_MODEL,
-                        },
-                        "turn_detection": None,
-                        "temperature": temperature,
-                    },
+                    "model": VLLM_MODEL,
                 })
                 
                 # Stream audio in chunks
@@ -137,9 +134,10 @@ async def voxtral_transcribe(
                     offset += chunk_bytes_size
                     await asyncio.sleep(0.01)
                 
-                # Signal end of input
+                # Signal end of input (final=True for file uploads)
                 await ws.send_json({
                     "type": "input_audio_buffer.commit",
+                    "final": True,
                 })
                 
                 # Collect response
@@ -149,25 +147,22 @@ async def voxtral_transcribe(
                         event = json.loads(msg.data)
                         event_type = event.get("type", "")
                         
-                        if event_type == "response.audio_transcript.delta":
+                        if event_type == "transcription.delta":
                             delta = event.get("delta", "")
                             full_text += delta
                         
-                        elif event_type == "response.audio_transcript.done":
-                            transcript = event.get("transcript", full_text)
+                        elif event_type == "transcription.done":
+                            transcript = event.get("text", full_text)
                             return {"text": transcript.strip()}
                         
-                        elif event_type == "response.done":
-                            break
-                        
                         elif event_type == "error":
-                            error_msg = event.get("error", {}).get("message", "unknown")
+                            error_msg = event.get("error", {}).get("message", str(event))
                             raise HTTPException(status_code=500, detail=f"Voxtral error: {error_msg}")
                     
                     elif msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.ERROR):
                         break
                 
-                # If we got here via response.done without audio_transcript.done
+                # If we exited loop without transcription.done
                 if full_text.strip():
                     return {"text": full_text.strip()}
                 

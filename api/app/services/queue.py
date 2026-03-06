@@ -27,7 +27,7 @@ celery_app.conf.update(
 async def enqueue_job(job_id: str, storage_key: str, config: dict):
     """Enqueue a transcription job."""
     celery_app.send_task(
-        "tasks.transcription.transcribe_audio",
+        "app.tasks.transcription.transcribe_audio",
         args=[job_id, storage_key, config],
         queue="transcription"
     )

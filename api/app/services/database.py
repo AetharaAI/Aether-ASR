@@ -1,6 +1,7 @@
 """Database operations."""
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy import select, update, and_
+from sqlalchemy import select, update, and_, func
+from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
 from typing import Optional, List, Tuple
 from datetime import datetime, timedelta
@@ -92,10 +93,12 @@ async def create_job(
 
 
 async def get_job(job_id: str) -> Optional[Job]:
-    """Get job by ID."""
+    """Get job by ID — eagerly loads relationships to avoid DetachedInstanceError."""
     async with async_session() as session:
         result = await session.execute(
-            select(Job).where(Job.id == job_id)
+            select(Job)
+            .options(selectinload(Job.artifacts), selectinload(Job.events))
+            .where(Job.id == job_id)
         )
         return result.scalar_one_or_none()
 
@@ -123,14 +126,14 @@ async def list_jobs(
         query = query.order_by(sort_field)
 
         # Count total (efficient approach)
-        from sqlalchemy import func
         count_query = select(func.count()).select_from(Job)
         if status:
             count_query = count_query.where(Job.status == status)
         count_result = await session.execute(count_query)
         total = count_result.scalar()
 
-        # Paginate
+        # Paginate — eager load to prevent DetachedInstanceError
+        query = query.options(selectinload(Job.artifacts), selectinload(Job.events))
         query = query.offset(offset).limit(limit)
         result = await session.execute(query)
         jobs = result.scalars().all()

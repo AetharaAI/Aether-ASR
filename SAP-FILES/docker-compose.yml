@@ -1,0 +1,230 @@
+# ─── Shared Environment ──────────────────────────────────────────────────────
+# Credentials come from .env file (not committed to git)
+
+x-common-env: &common-env
+  POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+  VALKEY_URL: valkey://:${VALKEY_PASSWORD}@valkey:6385/0
+  MINIO_ENDPOINT: minio:9100
+  MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+  MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+  MINIO_BUCKET: sap-audio
+  MINIO_SECURE: "false"
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  SAMPLE_RATE: ${SAMPLE_RATE:-44100}
+
+networks:
+  aether-audio:
+    name: aether-audio
+    driver: bridge
+
+services:
+  # ─── Infrastructure (no host ports — internal only) ────────────────────────
+
+  postgres:
+    image: postgres:16-alpine
+    networks: [aether-audio]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      retries: 5
+    restart: unless-stopped
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    networks: [aether-audio]
+    command: ["valkey-server", "--port", "6385", "--requirepass", "${VALKEY_PASSWORD}", "--appendonly", "yes"]
+    volumes: [valkeydata:/data]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "-p", "6385", "-a", "${VALKEY_PASSWORD}", "ping"]
+      interval: 5s
+      retries: 5
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    networks: [aether-audio]
+    command: server /data --address ":9100" --console-address ":9101"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes: [miniodata:/data]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9100/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # ─── Application Services ──────────────────────────────────────────────────
+
+  audio-gateway:
+    build:
+      context: .
+      dockerfile: services/audio_gateway/Dockerfile
+    networks: [aether-audio]
+    ports: ["127.0.0.1:8000:8000"]   # localhost only — nginx proxies this
+    environment:
+      <<: *common-env
+    depends_on:
+      postgres: { condition: service_healthy }
+      valkey: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    restart: unless-stopped
+
+  audio-preprocess:
+    build:
+      context: .
+      dockerfile: services/audio_preprocess/Dockerfile
+    networks: [aether-audio]
+    environment:
+      <<: *common-env
+    depends_on:
+      valkey: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    restart: unless-stopped
+
+  asr-worker:
+    build:
+      context: .
+      dockerfile: services/asr_worker/Dockerfile
+    networks: [aether-audio]
+    environment:
+      <<: *common-env
+      WHISPER_STREAMING_MODEL: ${WHISPER_STREAMING_MODEL:-distil-large-v3}
+      WHISPER_FINAL_MODEL: ${WHISPER_FINAL_MODEL:-large-v3}
+      DEVICE: ${DEVICE:-cuda}
+      COMPUTE_TYPE: ${COMPUTE_TYPE:-float16}
+      HF_TOKEN: ${HF_TOKEN:-}
+      NVIDIA_VISIBLE_DEVICES: "0"
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+    depends_on:
+      valkey: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    restart: unless-stopped
+
+  music-worker:
+    build:
+      context: .
+      dockerfile: services/music_worker/Dockerfile
+    networks: [aether-audio]
+    environment:
+      <<: *common-env
+    depends_on:
+      valkey: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    restart: unless-stopped
+
+  aligner:
+    build:
+      context: .
+      dockerfile: services/aligner/Dockerfile
+    networks: [aether-audio]
+    environment:
+      <<: *common-env
+    depends_on:
+      postgres: { condition: service_healthy }
+      valkey: { condition: service_healthy }
+    restart: unless-stopped
+
+  tts-worker:
+    build:
+      context: .
+      dockerfile: services/tts_worker/Dockerfile
+    networks: [aether-audio]
+    environment:
+      <<: *common-env
+      CHATTERBOX_URL: ${CHATTERBOX_URL:-https://tts.aetherpro.us}
+    depends_on:
+      valkey: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    restart: unless-stopped
+
+  # ─── Voxstral ASR (Primary) ────────────────────────────────────────────────
+
+  voxstral-vllm:
+    build:
+      context: .
+      dockerfile: services/voxstral_vllm/Dockerfile
+    networks: [aether-audio]
+    command:
+      - /models/mistralai/Voxtral-Mini-4B-Realtime-2602
+      - --gpu-memory-utilization
+      - "0.60"
+      - --max-model-len
+      - "8192"
+      - --enforce-eager
+    # No host port — voxstral-worker connects internally
+    volumes:
+      - /mnt/aetherpro/models/audio:/models:ro
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HF_HOME=/models
+      - NVIDIA_VISIBLE_DEVICES=0
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  voxstral-worker:
+    build:
+      context: .
+      dockerfile: services/voxstral_worker/Dockerfile
+    networks: [aether-audio]
+    environment:
+      <<: *common-env
+      VLLM_BASE_URL: http://voxstral-vllm:8000
+    depends_on:
+      valkey: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    restart: unless-stopped
+
+  # ─── Music Flamingo (Deep Analysis) ────────────────────────────────────────
+
+  flamingo-worker:
+    build:
+      context: .
+      dockerfile: services/flamingo_worker/Dockerfile
+    networks: [aether-audio]
+    volumes:
+      - /mnt/aetherpro/models/audio:/models:ro
+    environment:
+      <<: *common-env
+      FLAMINGO_MODEL_ID: /models/nvidia/music-flamingo-2601-hf
+      HF_TOKEN: ${HF_TOKEN:-}
+      HF_HOME: /models
+      NVIDIA_VISIBLE_DEVICES: "0"
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["2"]
+              capabilities: [gpu]
+    depends_on:
+      valkey: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  valkeydata:
+  miniodata:

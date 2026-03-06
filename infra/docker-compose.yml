@@ -125,6 +125,48 @@ services:
       - asr-network
     restart: unless-stopped
 
+  # Voxtral Realtime ASR (vLLM)
+  voxtral:
+    image: vllm/vllm-openai:latest
+    container_name: asr-voxtral
+    command:
+      - --model
+      - /models/mistralai/Voxtral-Mini-4B-Realtime-2602
+      - --gpu-memory-utilization
+      - "0.60"
+      - --max-model-len
+      - "8192"
+      - --enforce-eager
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8000"
+    volumes:
+      - /mnt/aetherpro/models/audio:/models:ro
+    environment:
+      - HF_HOME=/models
+      - NVIDIA_VISIBLE_DEVICES=${VOXTRAL_GPU_DEVICE_ID:-1}
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - VLLM_DISABLE_COMPILE_CACHE=1
+    ports:
+      - "127.0.0.1:${VOXTRAL_PORT:-8020}:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: [ "${VOXTRAL_GPU_DEVICE_ID:-1}" ]
+              capabilities: [ gpu ]
+    healthcheck:
+      test: [ "CMD", "curl", "-sf", "http://localhost:8000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    networks:
+      - asr-network
+    restart: unless-stopped
+
   # React Frontend
   ui:
     build:

@@ -64,6 +64,15 @@ async def health_check():
     except ImportError:
         services["gpu"] = {"available": False, "reason": "torch not installed"}
     
+    # Check Voxtral vLLM
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=5) as client:
+            vox_resp = await client.get(f"{settings.VOXTRAL_BASE_URL}/health")
+            services["voxtral"] = "connected" if vox_resp.status_code == 200 else "error"
+    except Exception:
+        services["voxtral"] = "not running"
+    
     return {
         "status": overall_status,
         "version": settings.APP_VERSION,

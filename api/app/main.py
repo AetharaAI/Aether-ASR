@@ -8,7 +8,7 @@ import time
 import structlog
 
 from app.config import settings
-from app.routers import openai, transcriptions, models, health, admin, websocket, account, tts
+from app.routers import openai, transcriptions, models, health, admin, websocket, account, tts, voxtral
 from app.middleware.logging import LoggingMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 
@@ -73,6 +73,7 @@ app.include_router(transcriptions.router, prefix="/api", tags=["Transcriptions"]
 app.include_router(models.router, prefix="/api", tags=["Models"])
 app.include_router(account.router, prefix="/api", tags=["Account"])
 app.include_router(tts.router, prefix="/api", tags=["TTS Proxy"])
+app.include_router(voxtral.router, prefix="/api", tags=["Voxtral Realtime"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 app.include_router(websocket.router, tags=["WebSocket"])
 

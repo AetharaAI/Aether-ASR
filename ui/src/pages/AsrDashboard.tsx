@@ -3,7 +3,7 @@ import toast from 'react-hot-toast';
 import {
     ArrowUpTrayIcon, DocumentTextIcon, Cog8ToothIcon, PlayIcon,
     StopIcon, SpeakerWaveIcon, MicrophoneIcon, DocumentArrowUpIcon,
-    ArrowPathIcon
+    ArrowPathIcon, BoltIcon
 } from '@heroicons/react/24/outline';
 import api from '../services/api';
 import ttsApi from '../services/ttsApi';
@@ -14,6 +14,7 @@ import WaveformVisualizer from '../components/WaveformVisualizer';
 import PipelineFlow from '../components/PipelineFlow';
 
 type StudioTab = 'asr' | 'tts' | 'workflow';
+type AsrEngine = 'whisper' | 'voxtral';
 
 export default function AsrDashboard() {
     const [activeTab, setActiveTab] = useState<StudioTab>('asr');
@@ -25,6 +26,7 @@ export default function AsrDashboard() {
     const [displayedTranscript, setDisplayedTranscript] = useState('');
     const [isTyping, setIsTyping] = useState(false);
     const [inputMode, setInputMode] = useState<'upload' | 'record'>('upload');
+    const [asrEngine, setAsrEngine] = useState<AsrEngine>('whisper');
     const transcriptStartTime = useRef<number>(0);
 
     const [config, setConfig] = useState({
@@ -40,6 +42,7 @@ export default function AsrDashboard() {
     // Service Health
     const [asrHealth, setAsrHealth] = useState<'healthy' | 'degraded' | 'checking'>('checking');
     const [ttsHealth, setTtsHealth] = useState<'healthy' | 'degraded' | 'checking'>('checking');
+    const [voxtralHealth, setVoxtralHealth] = useState<'healthy' | 'degraded' | 'checking'>('checking');
 
     // TTS in-transcript
     const [ttsVoices, setTtsVoices] = useState<string[]>([]);
@@ -55,6 +58,10 @@ export default function AsrDashboard() {
         }).catch(() => { });
 
         api.get('/api/health').then(() => setAsrHealth('healthy')).catch(() => setAsrHealth('degraded'));
+
+        api.get('/api/voxtral/health').then(res => {
+            setVoxtralHealth(res.data.status === 'healthy' ? 'healthy' : 'degraded');
+        }).catch(() => setVoxtralHealth('degraded'));
 
         ttsApi.getTtsHealth().then(data => {
             setTtsHealth(data.status === 'healthy' ? 'healthy' : 'degraded');
@@ -104,9 +111,28 @@ export default function AsrDashboard() {
         setDisplayedTranscript('');
         setTtsAudioUrl(null);
         transcriptStartTime.current = Date.now();
-        toast('Uploading and transcribing...', { icon: '⏳' });
+        const engineLabel = asrEngine === 'voxtral' ? 'Voxtral Realtime' : 'Faster-Whisper';
+        toast(`Uploading to ${engineLabel}...`, { icon: '⏳' });
 
         try {
+            // Voxtral path — direct transcription (no job queue)
+            if (asrEngine === 'voxtral') {
+                const formData = new FormData();
+                formData.append('file', audioFile);
+                formData.append('language', config.language === 'auto' ? '' : config.language);
+                formData.append('temperature', '0.0');
+
+                const res = await api.post('/api/voxtral/transcribe', formData);
+                setIsGenerating(false);
+                const text = res.data.text || '';
+                setTranscript(text);
+                const elapsed = ((Date.now() - transcriptStartTime.current) / 1000).toFixed(1);
+                const wordCount = text.split(/\s+/).length;
+                toast.success(`Voxtral done • ${wordCount} words • ${elapsed}s`);
+                return;
+            }
+
+            // Whisper path — async job via Celery
             const formData = new FormData();
             formData.append('file', audioFile);
             formData.append('model', config.model);
@@ -194,8 +220,8 @@ export default function AsrDashboard() {
     const HealthBadge = ({ status, label }: { status: string; label: string }) => (
         <div className="flex items-center space-x-1.5">
             <div className={`w-2 h-2 rounded-full transition-all duration-500 ${status === 'healthy' ? 'bg-emerald-400 health-pulse' :
-                    status === 'degraded' ? 'bg-yellow-400 health-pulse' :
-                        'bg-gray-500 animate-pulse'
+                status === 'degraded' ? 'bg-yellow-400 health-pulse' :
+                    'bg-gray-500 animate-pulse'
                 }`}
                 style={{ color: status === 'healthy' ? '#34d399' : status === 'degraded' ? '#facc15' : '#6b7280' }}
             />
@@ -243,8 +269,9 @@ export default function AsrDashboard() {
 
                 {/* Health Badges */}
                 <div className="flex items-center space-x-4">
-                    <HealthBadge status={asrHealth} label="ASR Engine" />
-                    <HealthBadge status={ttsHealth} label="TTS Engine" />
+                    <HealthBadge status={asrHealth} label="Whisper" />
+                    <HealthBadge status={voxtralHealth} label="Voxtral" />
+                    <HealthBadge status={ttsHealth} label="TTS" />
                 </div>
             </div>
 
@@ -257,6 +284,31 @@ export default function AsrDashboard() {
                             <h2 className="text-xl font-semibold mb-4 flex items-center">
                                 <Cog8ToothIcon className="w-5 h-5 mr-2 text-emerald-400" /> Settings
                             </h2>
+
+                            {/* Engine Selector */}
+                            <div className="mb-5">
+                                <label className="block text-sm font-medium text-gray-400 mb-2">ASR Engine</label>
+                                <div className="flex bg-[#2a2a2a] rounded-lg p-1 border border-gray-700">
+                                    <button
+                                        onClick={() => setAsrEngine('whisper')}
+                                        className={`flex-1 flex items-center justify-center py-2 text-sm font-medium rounded-md transition-all ${asrEngine === 'whisper' ? 'bg-[#3d3d3d] text-emerald-400 shadow' : 'text-gray-400 hover:text-gray-200'
+                                            }`}
+                                    >
+                                        <MicrophoneIcon className="w-4 h-4 mr-1.5" /> Faster-Whisper
+                                    </button>
+                                    <button
+                                        onClick={() => setAsrEngine('voxtral')}
+                                        className={`flex-1 flex items-center justify-center py-2 text-sm font-medium rounded-md transition-all ${asrEngine === 'voxtral' ? 'bg-[#3d3d3d] text-purple-400 shadow' : 'text-gray-400 hover:text-gray-200'
+                                            }`}
+                                    >
+                                        <BoltIcon className="w-4 h-4 mr-1.5" /> Voxtral RT
+                                    </button>
+                                </div>
+                                <p className="text-xs text-gray-600 mt-1.5">
+                                    {asrEngine === 'voxtral' ? 'Realtime streaming • 4B model • <500ms delay' : 'Offline batch • Multiple model sizes • VAD + diarization'}
+                                </p>
+                            </div>
+
                             <div className="space-y-4">
                                 <div>
                                     <label className="block text-sm font-medium text-gray-400 mb-1">Model Size</label>

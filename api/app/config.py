@@ -91,6 +91,11 @@ class Settings(BaseSettings):
     TTS_MODEL: str = "chatterbox"
     TTS_TIMEOUT_SECONDS: int = 120
     
+    # Voxtral Realtime ASR (vLLM)
+    VOXTRAL_BASE_URL: str = "http://voxtral:8000"
+    VOXTRAL_ENABLED: bool = True
+    VOXTRAL_TIMEOUT_SECONDS: int = 120
+    
     class Config:
         env_file = ".env"
         case_sensitive = True

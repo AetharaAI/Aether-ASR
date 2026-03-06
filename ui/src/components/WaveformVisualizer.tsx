@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 
 interface WaveformVisualizerProps {
-    /** Color theme: emerald for ASR, blue for TTS */
-    color?: 'emerald' | 'blue';
+    /** Color theme: emerald for ASR, blue for TTS, purple for Voxtral */
+    color?: 'emerald' | 'blue' | 'purple';
     /** Number of bars */
     barCount?: number;
     /** Status messages to cycle through */
@@ -27,6 +27,12 @@ const colorMap = {
         barGlow: 'shadow-[0_0_6px_rgba(96,165,250,0.5)]',
         text: 'text-blue-400',
         textSecondary: 'text-blue-300/60',
+    },
+    purple: {
+        bar: 'bg-purple-400',
+        barGlow: 'shadow-[0_0_6px_rgba(192,132,252,0.5)]',
+        text: 'text-purple-400',
+        textSecondary: 'text-purple-300/60',
     },
 };
 

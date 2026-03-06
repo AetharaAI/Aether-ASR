@@ -1,31 +1,29 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import {
-    ArrowUpTrayIcon, DocumentTextIcon, Cog8ToothIcon, PlayIcon,
-    StopIcon, SpeakerWaveIcon, MicrophoneIcon, DocumentArrowUpIcon,
-    ArrowPathIcon, BoltIcon
+    ArrowUpTrayIcon, Cog8ToothIcon, PlayIcon,
+    SpeakerWaveIcon, MicrophoneIcon,
+    BoltIcon, ChevronRightIcon, ChevronLeftIcon,
+    SignalIcon
 } from '@heroicons/react/24/outline';
 import api from '../services/api';
 import ttsApi from '../services/ttsApi';
 import AudioRecorder from '../components/AudioRecorder';
 import Header from '../components/Header';
-import TtsPanel from '../components/TtsPanel';
 import WaveformVisualizer from '../components/WaveformVisualizer';
-import PipelineFlow from '../components/PipelineFlow';
+import LiveTranscriber from '../components/LiveTranscriber';
 
-type StudioTab = 'asr' | 'tts' | 'workflow';
 type AsrEngine = 'whisper' | 'voxtral';
+type InputMode = 'upload' | 'record' | 'live';
 
 export default function AsrDashboard() {
-    const [activeTab, setActiveTab] = useState<StudioTab>('asr');
-
     // ASR State
     const [file, setFile] = useState<File | null>(null);
     const [isGenerating, setIsGenerating] = useState(false);
     const [transcript, setTranscript] = useState('');
     const [displayedTranscript, setDisplayedTranscript] = useState('');
     const [isTyping, setIsTyping] = useState(false);
-    const [inputMode, setInputMode] = useState<'upload' | 'record'>('upload');
+    const [inputMode, setInputMode] = useState<InputMode>('upload');
     const [asrEngine, setAsrEngine] = useState<AsrEngine>('whisper');
     const transcriptStartTime = useRef<number>(0);
 
@@ -44,7 +42,11 @@ export default function AsrDashboard() {
     const [ttsHealth, setTtsHealth] = useState<'healthy' | 'degraded' | 'checking'>('checking');
     const [voxtralHealth, setVoxtralHealth] = useState<'healthy' | 'degraded' | 'checking'>('checking');
 
-    // TTS in-transcript
+    // TTS Panel
+    const [ttsOpen, setTtsOpen] = useState(false);
+    const [ttsScript, setTtsScript] = useState('');
+
+    // TTS in-transcript voices
     const [ttsVoices, setTtsVoices] = useState<string[]>([]);
     const [selectedVoice, setSelectedVoice] = useState<string>('');
     const [isGeneratingTTS, setIsGeneratingTTS] = useState(false);
@@ -80,20 +82,18 @@ export default function AsrDashboard() {
     useEffect(() => {
         if (!transcript || isGenerating) {
             setDisplayedTranscript('');
+            setIsTyping(false);
             return;
         }
-        setIsTyping(true);
         setDisplayedTranscript('');
-        let i = 0;
-        const chunkSize = Math.max(1, Math.floor(transcript.length / 100)); // show in ~100 steps
+        setIsTyping(true);
+        let idx = 0;
         const timer = setInterval(() => {
-            i += chunkSize;
-            if (i >= transcript.length) {
-                setDisplayedTranscript(transcript);
-                setIsTyping(false);
+            idx++;
+            setDisplayedTranscript(transcript.slice(0, idx));
+            if (idx >= transcript.length) {
                 clearInterval(timer);
-            } else {
-                setDisplayedTranscript(transcript.slice(0, i));
+                setIsTyping(false);
             }
         }, 20);
         return () => clearInterval(timer);
@@ -163,22 +163,22 @@ export default function AsrDashboard() {
                         setTranscript(text);
                         const elapsed = ((Date.now() - transcriptStartTime.current) / 1000).toFixed(1);
                         const wordCount = text.split(/\s+/).length;
-                        toast.success(`ASR complete • ${wordCount} words • ${elapsed}s • ${config.model}`);
+                        toast.success(`Transcription complete • ${wordCount} words • ${elapsed}s • ${config.model}`);
                     } else if (statusRes.data.status === 'failed') {
                         clearInterval(pollInterval);
                         setIsGenerating(false);
-                        toast.error("Transcription failed.");
+                        toast.error('Transcription failed: ' + (statusRes.data.error || 'Unknown error'));
                     }
-                } catch {
+                } catch (err) {
                     clearInterval(pollInterval);
                     setIsGenerating(false);
+                    toast.error('Error checking transcription status.');
                 }
             }, 2000);
+
         } catch (error: any) {
-            console.error(error);
             setIsGenerating(false);
-            const detail = error?.response?.data?.detail || error?.response?.data?.error?.message || "Failed to submit job.";
-            toast.error(typeof detail === 'string' ? detail : "Failed to submit job.");
+            toast.error(error.response?.data?.detail || 'Transcription failed.');
         }
     };
 
@@ -193,12 +193,17 @@ export default function AsrDashboard() {
         submitTranscription(audioFile);
     };
 
+    const handleLiveTranscriptUpdate = useCallback((text: string) => {
+        setTranscript(text);
+        setDisplayedTranscript(text);
+    }, []);
+
     const handleSendToTTS = async () => {
         if (!transcript) return;
         setIsGeneratingTTS(true);
         try {
             const blob = await ttsApi.generateTTS({
-                text: transcript,
+                text: ttsScript || transcript,
                 voice_mode: 'predefined',
                 predefined_voice_id: selectedVoice,
                 output_format: 'wav',
@@ -213,316 +218,364 @@ export default function AsrDashboard() {
         }
     };
 
-    const handleSendToWorkflow = () => {
-        setActiveTab('tts');
-    };
-
     const HealthBadge = ({ status, label }: { status: string; label: string }) => (
         <div className="flex items-center space-x-1.5">
             <div className={`w-2 h-2 rounded-full transition-all duration-500 ${status === 'healthy' ? 'bg-emerald-400 health-pulse' :
                 status === 'degraded' ? 'bg-yellow-400 health-pulse' :
                     'bg-gray-500 animate-pulse'
                 }`}
-                style={{ color: status === 'healthy' ? '#34d399' : status === 'degraded' ? '#facc15' : '#6b7280' }}
             />
             <span className="text-xs text-gray-500">{label}</span>
         </div>
     );
 
-    const tabs: { id: StudioTab; label: string; icon: any; color: string }[] = [
-        { id: 'asr', label: 'Transcribe', icon: MicrophoneIcon, color: 'emerald' },
-        { id: 'tts', label: 'Synthesize', icon: SpeakerWaveIcon, color: 'blue' },
-        { id: 'workflow', label: 'Pipeline', icon: ArrowPathIcon, color: 'purple' },
+    const inputModes: { id: InputMode; label: string; icon: any; color: string }[] = [
+        { id: 'upload', label: 'Upload', icon: ArrowUpTrayIcon, color: 'emerald' },
+        { id: 'record', label: 'Record', icon: MicrophoneIcon, color: 'emerald' },
+        { id: 'live', label: 'Live', icon: SignalIcon, color: 'purple' },
     ];
 
     return (
-        <div className="min-h-screen bg-[#121212] text-white p-6 md:p-12 font-sans">
+        <div className="min-h-screen bg-[#121212] text-white p-4 md:p-8 font-sans flex flex-col">
             <Header />
 
-            {/* Service Health + Tab Navigation */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 gap-4">
-                {/* Tabs */}
-                <div className="flex bg-[#1e1e1e] rounded-xl p-1 border border-gray-800">
-                    {tabs.map(tab => {
-                        const Icon = tab.icon;
-                        const isActive = activeTab === tab.id;
-                        const colorMap: Record<string, string> = {
-                            emerald: isActive ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/50' : '',
-                            blue: isActive ? 'bg-blue-600/20 text-blue-400 border-blue-500/50' : '',
-                            purple: isActive ? 'bg-purple-600/20 text-purple-400 border-purple-500/50' : '',
-                        };
-                        return (
-                            <button
-                                key={tab.id}
-                                onClick={() => setActiveTab(tab.id)}
-                                className={`flex items-center px-5 py-2.5 rounded-lg text-sm font-medium transition-all border border-transparent ${isActive
-                                    ? colorMap[tab.color]
-                                    : 'text-gray-500 hover:text-gray-300 hover:bg-[#2a2a2a]'
-                                    }`}
-                            >
-                                <Icon className="w-4 h-4 mr-2" />
-                                {tab.label}
-                            </button>
-                        );
-                    })}
-                </div>
-
-                {/* Health Badges */}
+            {/* Top bar: Health badges + TTS toggle */}
+            <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center space-x-4">
                     <HealthBadge status={asrHealth} label="Whisper" />
                     <HealthBadge status={voxtralHealth} label="Voxtral" />
                     <HealthBadge status={ttsHealth} label="TTS" />
                 </div>
+                <button
+                    onClick={() => setTtsOpen(!ttsOpen)}
+                    className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all border ${ttsOpen
+                        ? 'bg-blue-600/20 text-blue-400 border-blue-500/50'
+                        : 'bg-[#1e1e1e] text-gray-400 border-gray-700 hover:text-gray-200 hover:border-gray-500'
+                        }`}
+                >
+                    <SpeakerWaveIcon className="w-4 h-4 mr-2" />
+                    TTS Studio
+                    {ttsOpen ? <ChevronRightIcon className="w-4 h-4 ml-2" /> : <ChevronLeftIcon className="w-4 h-4 ml-2" />}
+                </button>
             </div>
 
-            {/* ─────────── ASR TAB ─────────── */}
-            {activeTab === 'asr' && (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    {/* Left Column: Settings + Input */}
-                    <div className="col-span-1 space-y-6">
-                        <div className="bg-[#1e1e1e] rounded-xl p-6 border border-gray-800 shadow-lg">
-                            <h2 className="text-xl font-semibold mb-4 flex items-center">
-                                <Cog8ToothIcon className="w-5 h-5 mr-2 text-emerald-400" /> Settings
-                            </h2>
+            {/* ─── 3-Panel Layout ─── */}
+            <div className="flex-1 flex gap-6 min-h-0">
 
-                            {/* Engine Selector */}
-                            <div className="mb-5">
-                                <label className="block text-sm font-medium text-gray-400 mb-2">ASR Engine</label>
-                                <div className="flex bg-[#2a2a2a] rounded-lg p-1 border border-gray-700">
+                {/* ═══ LEFT PANEL: ASR Controls ═══ */}
+                <div className="w-72 flex-shrink-0 space-y-5 overflow-y-auto">
+
+                    {/* Engine Selector */}
+                    <div className="bg-[#1e1e1e] rounded-xl p-5 border border-gray-800">
+                        <h3 className="text-sm font-semibold text-gray-400 mb-3 flex items-center">
+                            <Cog8ToothIcon className="w-4 h-4 mr-1.5 text-emerald-400" /> ASR Engine
+                        </h3>
+                        <div className="flex bg-[#2a2a2a] rounded-lg p-1 border border-gray-700">
+                            <button
+                                onClick={() => setAsrEngine('whisper')}
+                                className={`flex-1 flex items-center justify-center py-2 text-xs font-medium rounded-md transition-all ${asrEngine === 'whisper' ? 'bg-[#3d3d3d] text-emerald-400 shadow' : 'text-gray-400 hover:text-gray-200'
+                                    }`}
+                            >
+                                <MicrophoneIcon className="w-3.5 h-3.5 mr-1" /> Whisper
+                            </button>
+                            <button
+                                onClick={() => { setAsrEngine('voxtral'); setInputMode('live'); }}
+                                className={`flex-1 flex items-center justify-center py-2 text-xs font-medium rounded-md transition-all ${asrEngine === 'voxtral' ? 'bg-[#3d3d3d] text-purple-400 shadow' : 'text-gray-400 hover:text-gray-200'
+                                    }`}
+                            >
+                                <BoltIcon className="w-3.5 h-3.5 mr-1" /> Voxtral
+                            </button>
+                        </div>
+                        <p className="text-[10px] text-gray-600 mt-2">
+                            {asrEngine === 'voxtral' ? 'Realtime streaming • 4B • <500ms' : 'Offline batch • VAD + diarization'}
+                        </p>
+                    </div>
+
+                    {/* Input Mode */}
+                    <div className="bg-[#1e1e1e] rounded-xl p-5 border border-gray-800">
+                        <h3 className="text-sm font-semibold text-gray-400 mb-3">Input Mode</h3>
+                        <div className="flex bg-[#2a2a2a] rounded-lg p-1 border border-gray-700">
+                            {inputModes.map(mode => {
+                                const Icon = mode.icon;
+                                const isActive = inputMode === mode.id;
+                                // Only show Live for voxtral, Upload/Record for both
+                                if (mode.id === 'live' && asrEngine !== 'voxtral') return null;
+                                return (
                                     <button
-                                        onClick={() => setAsrEngine('whisper')}
-                                        className={`flex-1 flex items-center justify-center py-2 text-sm font-medium rounded-md transition-all ${asrEngine === 'whisper' ? 'bg-[#3d3d3d] text-emerald-400 shadow' : 'text-gray-400 hover:text-gray-200'
+                                        key={mode.id}
+                                        onClick={() => setInputMode(mode.id)}
+                                        className={`flex-1 flex items-center justify-center py-2 text-xs font-medium rounded-md transition-all ${isActive
+                                            ? `bg-[#3d3d3d] ${mode.color === 'purple' ? 'text-purple-400' : 'text-emerald-400'} shadow`
+                                            : 'text-gray-400 hover:text-gray-200'
                                             }`}
                                     >
-                                        <MicrophoneIcon className="w-4 h-4 mr-1.5" /> Faster-Whisper
+                                        <Icon className="w-3.5 h-3.5 mr-1" /> {mode.label}
                                     </button>
-                                    <button
-                                        onClick={() => setAsrEngine('voxtral')}
-                                        className={`flex-1 flex items-center justify-center py-2 text-sm font-medium rounded-md transition-all ${asrEngine === 'voxtral' ? 'bg-[#3d3d3d] text-purple-400 shadow' : 'text-gray-400 hover:text-gray-200'
-                                            }`}
-                                    >
-                                        <BoltIcon className="w-4 h-4 mr-1.5" /> Voxtral RT
-                                    </button>
-                                </div>
-                                <p className="text-xs text-gray-600 mt-1.5">
-                                    {asrEngine === 'voxtral' ? 'Realtime streaming • 4B model • <500ms delay' : 'Offline batch • Multiple model sizes • VAD + diarization'}
-                                </p>
-                            </div>
+                                );
+                            })}
+                        </div>
+                    </div>
 
-                            <div className="space-y-4">
+                    {/* Config (only for Whisper or Upload/Record) */}
+                    {(asrEngine === 'whisper' || inputMode !== 'live') && (
+                        <div className="bg-[#1e1e1e] rounded-xl p-5 border border-gray-800 space-y-3">
+                            <h3 className="text-sm font-semibold text-gray-400 mb-2">Configuration</h3>
+
+                            {asrEngine === 'whisper' && (
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-400 mb-1">Model Size</label>
+                                    <label className="block text-xs text-gray-500 mb-1">Model</label>
                                     <select
-                                        className="w-full bg-[#2a2a2a] border border-gray-700 rounded-md py-2 px-3 text-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
                                         value={config.model}
                                         onChange={(e) => setConfig({ ...config, model: e.target.value })}
+                                        className="w-full bg-[#2a2a2a] border border-gray-700 rounded py-1.5 px-2 text-xs text-gray-200 focus:outline-none focus:border-emerald-500"
                                     >
-                                        {availableModels.length > 0 ? (
-                                            availableModels.map(m => <option key={m} value={m}>{m}</option>)
-                                        ) : (
-                                            <>
-                                                <option value="tiny">tiny</option>
-                                                <option value="base">base</option>
-                                                <option value="large-v3">large-v3</option>
-                                            </>
-                                        )}
+                                        {availableModels.length > 0
+                                            ? availableModels.map(m => <option key={m} value={m}>{m}</option>)
+                                            : ['tiny', 'base', 'small', 'medium', 'large-v3'].map(m => <option key={m} value={m}>{m}</option>)
+                                        }
                                     </select>
                                 </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-400 mb-1">Language</label>
-                                    <input
-                                        type="text" value={config.language}
-                                        onChange={(e) => setConfig({ ...config, language: e.target.value })}
-                                        className="w-full bg-[#2a2a2a] border border-gray-700 rounded-md py-2 px-3 text-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                                        placeholder="auto"
-                                    />
-                                </div>
-                                <div className="pt-2 space-y-2">
-                                    {[
-                                        { key: 'vad_enabled', label: 'Voice Activity Detection (VAD)' },
-                                        { key: 'word_timestamps', label: 'Word-level Timestamps' },
-                                        { key: 'diarization_enabled', label: 'Speaker Diarization' },
-                                    ].map(opt => (
-                                        <label key={opt.key} className="flex items-center space-x-2">
-                                            <input
-                                                type="checkbox"
-                                                checked={(config as any)[opt.key]}
-                                                onChange={(e) => setConfig({ ...config, [opt.key]: e.target.checked })}
-                                                className="rounded text-emerald-500 focus:ring-emerald-500 bg-[#2a2a2a] border-gray-600"
-                                            />
-                                            <span className="text-sm text-gray-300">{opt.label}</span>
-                                        </label>
+                            )}
+
+                            <div>
+                                <label className="block text-xs text-gray-500 mb-1">Language</label>
+                                <select
+                                    value={config.language}
+                                    onChange={(e) => setConfig({ ...config, language: e.target.value })}
+                                    className="w-full bg-[#2a2a2a] border border-gray-700 rounded py-1.5 px-2 text-xs text-gray-200 focus:outline-none focus:border-emerald-500"
+                                >
+                                    {['auto', 'en', 'es', 'fr', 'de', 'ja', 'zh', 'ko', 'pt', 'ru', 'ar', 'it', 'nl', 'hi'].map(l => (
+                                        <option key={l} value={l}>{l === 'auto' ? 'Auto Detect' : l.toUpperCase()}</option>
                                     ))}
-                                </div>
+                                </select>
                             </div>
+
+                            {asrEngine === 'whisper' && (
+                                <>
+                                    <label className="flex items-center text-xs text-gray-400 space-x-2">
+                                        <input type="checkbox" checked={config.vad_enabled}
+                                            onChange={(e) => setConfig({ ...config, vad_enabled: e.target.checked })}
+                                            className="rounded bg-[#2a2a2a] border-gray-600" />
+                                        <span>VAD (Voice Activity Detection)</span>
+                                    </label>
+                                    <label className="flex items-center text-xs text-gray-400 space-x-2">
+                                        <input type="checkbox" checked={config.diarization_enabled}
+                                            onChange={(e) => setConfig({ ...config, diarization_enabled: e.target.checked })}
+                                            className="rounded bg-[#2a2a2a] border-gray-600" />
+                                        <span>Speaker Diarization</span>
+                                    </label>
+                                    <label className="flex items-center text-xs text-gray-400 space-x-2">
+                                        <input type="checkbox" checked={config.word_timestamps}
+                                            onChange={(e) => setConfig({ ...config, word_timestamps: e.target.checked })}
+                                            className="rounded bg-[#2a2a2a] border-gray-600" />
+                                        <span>Word Timestamps</span>
+                                    </label>
+                                </>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Input Area */}
+                    <div className="bg-[#1e1e1e] rounded-xl p-5 border border-gray-800">
+                        {inputMode === 'upload' && (
+                            <div className="space-y-3">
+                                <h3 className="text-sm font-semibold text-gray-400">Upload Audio</h3>
+                                <label className="flex flex-col items-center justify-center w-full py-6 border-2 border-dashed border-gray-700 rounded-xl cursor-pointer hover:border-emerald-600/50 transition-colors bg-[#1a1a1a]">
+                                    <ArrowUpTrayIcon className="w-8 h-8 text-gray-500 mb-2" />
+                                    <span className="text-xs text-gray-500">
+                                        {file ? file.name : 'Drop audio or click'}
+                                    </span>
+                                    <input type="file" accept="audio/*" onChange={handleFileChange} className="hidden" />
+                                </label>
+                                <button
+                                    onClick={handleGenerate}
+                                    disabled={!file || isGenerating}
+                                    className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-all hover:shadow-[0_0_15px_rgba(16,185,129,0.3)] flex items-center justify-center"
+                                >
+                                    {isGenerating ? (
+                                        <><span className="animate-spin mr-2">⏳</span> Processing...</>
+                                    ) : (
+                                        <><PlayIcon className="w-4 h-4 mr-2" /> Transcribe</>
+                                    )}
+                                </button>
+                            </div>
+                        )}
+
+                        {inputMode === 'record' && (
+                            <div className="space-y-3">
+                                <h3 className="text-sm font-semibold text-gray-400">Record Audio</h3>
+                                <AudioRecorder onRecordingComplete={handleRecordingComplete} isTranscribing={isGenerating} />
+                            </div>
+                        )}
+
+                        {inputMode === 'live' && (
+                            <div className="space-y-3">
+                                <h3 className="text-sm font-semibold text-gray-400 flex items-center">
+                                    <SignalIcon className="w-4 h-4 mr-1.5 text-purple-400" /> Live Transcription
+                                </h3>
+                                <LiveTranscriber onTranscriptUpdate={handleLiveTranscriptUpdate} />
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* ═══ CENTER: Transcript Area ═══ */}
+                <div className="flex-1 flex flex-col min-w-0 panel-transition">
+
+                    {/* Transcript box (or split when TTS open) */}
+                    <div className="flex-1 flex flex-col gap-4">
+
+                        {/* ASR Transcript */}
+                        <div className={`bg-[#1e1e1e] rounded-xl border border-gray-800 shadow-lg flex flex-col ${ttsOpen ? 'flex-1' : 'flex-1'}`}>
+                            <div className="px-5 py-3 border-b border-gray-800 flex items-center justify-between">
+                                <h3 className="text-sm font-semibold text-gray-400 flex items-center">
+                                    <MicrophoneIcon className="w-4 h-4 mr-1.5 text-emerald-400" />
+                                    Transcription
+                                    {inputMode === 'live' && transcript && (
+                                        <span className="ml-2 flex items-center">
+                                            <span className="live-dot mr-1" />
+                                            <span className="text-[10px] text-red-400 font-mono">LIVE</span>
+                                        </span>
+                                    )}
+                                </h3>
+                                {transcript && (
+                                    <span className="text-[10px] text-gray-600 font-mono">
+                                        {transcript.split(/\s+/).length} words
+                                    </span>
+                                )}
+                            </div>
+
+                            <div className="flex-1 p-5 overflow-y-auto font-mono text-sm leading-relaxed text-gray-300 min-h-[200px]">
+                                {isGenerating ? (
+                                    <div className="flex flex-col items-center justify-center h-full">
+                                        <WaveformVisualizer
+                                            color={asrEngine === 'voxtral' ? 'purple' : 'emerald'}
+                                            barCount={28}
+                                            statusMessages={
+                                                asrEngine === 'voxtral'
+                                                    ? ['Connecting to Voxtral...', 'Streaming audio...', 'Realtime decoding...']
+                                                    : ['Initializing ASR Engine...', `Loading ${config.model}...`, 'Analyzing audio...', 'Decoding speech...']
+                                            }
+                                        />
+                                    </div>
+                                ) : displayedTranscript ? (
+                                    <div className="whitespace-pre-wrap animate-fade-in-up">
+                                        {displayedTranscript}
+                                        {isTyping && <span className="typewriter-cursor" />}
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center justify-center h-full text-gray-600">
+                                        {inputMode === 'live'
+                                            ? 'Start live transcription to see words appear in real time.'
+                                            : 'Transcribed text will appear here.'}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Quick actions under transcript */}
+                            {transcript && !ttsOpen && (
+                                <div className="px-5 py-3 border-t border-gray-800 flex items-center justify-between">
+                                    <button
+                                        onClick={() => { setTtsScript(transcript); setTtsOpen(true); }}
+                                        className="text-xs bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 px-3 py-1.5 rounded border border-blue-500/50 transition flex items-center"
+                                    >
+                                        <SpeakerWaveIcon className="w-3.5 h-3.5 mr-1" /> Send to TTS
+                                    </button>
+                                    <button
+                                        onClick={() => { navigator.clipboard.writeText(transcript); toast.success('Copied!'); }}
+                                        className="text-xs text-gray-500 hover:text-gray-300 transition"
+                                    >
+                                        Copy
+                                    </button>
+                                </div>
+                            )}
                         </div>
 
-                        <div className="bg-[#1e1e1e] rounded-xl p-6 border border-gray-800 shadow-lg">
-                            <div className="flex bg-[#2a2a2a] rounded-lg p-1 mb-6 border border-gray-700">
-                                <button
-                                    onClick={() => setInputMode('upload')}
-                                    className={`flex-1 flex items-center justify-center py-2 text-sm font-medium rounded-md transition-all ${inputMode === 'upload' ? 'bg-[#3d3d3d] text-emerald-400 shadow' : 'text-gray-400 hover:text-gray-200'}`}
+                        {/* TTS Script Input (only when TTS panel is open) */}
+                        {ttsOpen && (
+                            <div className="bg-[#1e1e1e] rounded-xl border border-blue-800/30 shadow-lg flex flex-col flex-1 tts-panel-enter">
+                                <div className="px-5 py-3 border-b border-gray-800 flex items-center justify-between">
+                                    <h3 className="text-sm font-semibold text-gray-400 flex items-center">
+                                        <SpeakerWaveIcon className="w-4 h-4 mr-1.5 text-blue-400" />
+                                        TTS Script
+                                    </h3>
+                                    <span className="text-[10px] text-gray-600 font-mono">
+                                        {ttsScript.split(/\s+/).filter(Boolean).length} words
+                                    </span>
+                                </div>
+                                <textarea
+                                    value={ttsScript}
+                                    onChange={(e) => setTtsScript(e.target.value)}
+                                    placeholder="Enter or paste your TTS script here. You can edit the transcription or write new text for voice synthesis..."
+                                    className="flex-1 p-5 bg-transparent resize-none text-sm text-gray-300 font-mono leading-relaxed focus:outline-none placeholder-gray-700 min-h-[150px]"
+                                />
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* ═══ RIGHT PANEL: TTS Slide-out ═══ */}
+                {ttsOpen && (
+                    <div className="w-80 flex-shrink-0 overflow-y-auto tts-panel-enter">
+                        <div className="bg-[#1e1e1e] rounded-xl border border-blue-800/30 p-5 space-y-4">
+                            <h3 className="text-sm font-semibold text-blue-400 flex items-center">
+                                <SpeakerWaveIcon className="w-4 h-4 mr-1.5" /> Voice Synthesis
+                            </h3>
+
+                            {/* Voice Select */}
+                            <div>
+                                <label className="block text-xs text-gray-500 mb-1">Voice</label>
+                                <select
+                                    value={selectedVoice}
+                                    onChange={(e) => setSelectedVoice(e.target.value)}
+                                    className="w-full bg-[#2a2a2a] border border-gray-700 rounded py-1.5 px-2 text-xs text-gray-200 focus:outline-none focus:border-blue-500"
                                 >
-                                    <DocumentArrowUpIcon className="w-4 h-4 mr-2" /> Upload File
-                                </button>
-                                <button
-                                    onClick={() => setInputMode('record')}
-                                    className={`flex-1 flex items-center justify-center py-2 text-sm font-medium rounded-md transition-all ${inputMode === 'record' ? 'bg-[#3d3d3d] text-emerald-400 shadow' : 'text-gray-400 hover:text-gray-200'}`}
-                                >
-                                    <MicrophoneIcon className="w-4 h-4 mr-2" /> Record Audio
-                                </button>
+                                    {ttsVoices.map(v => (
+                                        <option key={v} value={v}>{v.replace('.wav', '')}</option>
+                                    ))}
+                                </select>
                             </div>
 
-                            {inputMode === 'upload' ? (
-                                <>
-                                    <div className="flex items-center justify-center w-full">
-                                        <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-gray-700 border-dashed rounded-lg cursor-pointer bg-[#2a2a2a] hover:bg-[#333] hover:border-emerald-600/40 transition-all">
-                                            <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                                                <ArrowUpTrayIcon className="w-8 h-8 mb-3 text-gray-400" />
-                                                <p className="mb-2 text-sm text-gray-400"><span className="font-semibold">Click to upload</span> or drag and drop</p>
-                                                <p className="text-xs text-gray-500">.wav, .mp3, .m4a, .webm, .ogg, .flac</p>
-                                            </div>
-                                            <input type="file" className="hidden" accept=".wav,.mp3,.m4a,.webm,.ogg,.flac,.opus" onChange={handleFileChange} />
-                                        </label>
-                                    </div>
-                                    {file && (
-                                        <div className="mt-4 p-3 bg-emerald-900/30 border border-emerald-800 rounded text-sm text-emerald-200 animate-fade-in-up">
-                                            Selected: {file.name}
-                                        </div>
-                                    )}
-                                    <button
-                                        onClick={handleGenerate}
-                                        disabled={isGenerating || !file}
-                                        className={`w-full mt-6 py-3 rounded-lg font-bold flex items-center justify-center transition-all ${isGenerating || !file
-                                            ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                                            : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] hover:shadow-[0_0_25px_rgba(16,185,129,0.6)]'
-                                            }`}
+                            {/* Generate Button */}
+                            <button
+                                onClick={handleSendToTTS}
+                                disabled={!ttsScript.trim() || isGeneratingTTS}
+                                className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-all hover:shadow-[0_0_15px_rgba(59,130,246,0.3)] flex items-center justify-center"
+                            >
+                                {isGeneratingTTS ? (
+                                    <WaveformVisualizer color="blue" barCount={12} compact statusMessages={['Synthesizing...']} />
+                                ) : (
+                                    <><PlayIcon className="w-4 h-4 mr-2" /> Generate Voice</>
+                                )}
+                            </button>
+
+                            {/* Audio Player */}
+                            {ttsAudioUrl && (
+                                <div className="bg-[#0a0a0a] rounded-lg p-3 border border-gray-800">
+                                    <audio controls src={ttsAudioUrl} className="w-full h-8" />
+                                    <a
+                                        href={ttsAudioUrl}
+                                        download="synthesis.wav"
+                                        className="block text-center text-xs text-blue-400 mt-2 hover:text-blue-300 transition"
                                     >
-                                        {isGenerating ? (
-                                            <><StopIcon className="w-5 h-5 mr-2 animate-pulse" /> Transcribing...</>
-                                        ) : (
-                                            <><PlayIcon className="w-5 h-5 mr-2" /> Start Transcription</>
-                                        )}
-                                    </button>
-                                </>
-                            ) : (
-                                <AudioRecorder onRecordingComplete={handleRecordingComplete} isTranscribing={isGenerating} />
+                                        Download Audio
+                                    </a>
+                                </div>
+                            )}
+
+                            {/* Quick: Send transcript to TTS script */}
+                            {transcript && !ttsScript && (
+                                <button
+                                    onClick={() => setTtsScript(transcript)}
+                                    className="w-full text-xs text-gray-500 hover:text-gray-300 py-2 border border-gray-800 rounded-lg transition hover:border-gray-600"
+                                >
+                                    ← Use transcript as script
+                                </button>
                             )}
                         </div>
                     </div>
-
-                    {/* Right Column: Output */}
-                    <div className="col-span-1 lg:col-span-2">
-                        <div className="bg-[#1e1e1e] rounded-xl p-6 border border-gray-800 shadow-lg h-full min-h-[500px] flex flex-col">
-                            <div className="flex justify-between items-center mb-4">
-                                <h2 className="text-xl font-semibold flex items-center">
-                                    <DocumentTextIcon className="w-5 h-5 mr-2 text-emerald-400" /> Transcript Output
-                                </h2>
-                                {transcript && (
-                                    <div className="flex space-x-2">
-                                        <button
-                                            onClick={() => { navigator.clipboard.writeText(transcript); toast.success("Copied!"); }}
-                                            className="text-xs bg-[#2a2a2a] hover:bg-[#333] px-3 py-1 rounded border border-gray-700 transition"
-                                        >
-                                            Copy
-                                        </button>
-                                        <button
-                                            onClick={handleSendToWorkflow}
-                                            className="text-xs bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 px-3 py-1 rounded border border-blue-500/50 transition"
-                                        >
-                                            → Send to TTS
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
-
-                            <div className="flex-1 bg-[#0a0a0a] border border-gray-800 rounded-lg overflow-hidden flex flex-col">
-                                <div className="flex-1 p-5 overflow-y-auto font-mono text-sm leading-relaxed text-gray-300">
-                                    {isGenerating ? (
-                                        <div className="flex flex-col items-center justify-center h-full min-h-[300px]">
-                                            <WaveformVisualizer
-                                                color="emerald"
-                                                barCount={28}
-                                                statusMessages={[
-                                                    'Initializing ASR Engine...',
-                                                    `Loading ${config.model} model...`,
-                                                    'Analyzing audio waveform...',
-                                                    'Detecting speech segments...',
-                                                    'Decoding language patterns...',
-                                                    'Processing with Faster-Whisper...',
-                                                ]}
-                                            />
-                                        </div>
-                                    ) : displayedTranscript ? (
-                                        <div className="whitespace-pre-wrap animate-fade-in-up">
-                                            {displayedTranscript}
-                                            {isTyping && <span className="typewriter-cursor" />}
-                                        </div>
-                                    ) : (
-                                        <div className="flex items-center justify-center h-full text-gray-600 min-h-[300px]">
-                                            Transcribed text will appear here.
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* Inline TTS Action */}
-                                {transcript && ttsVoices.length > 0 && (
-                                    <div className="bg-[#161616] border-t border-gray-800 p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-                                        <div className="flex items-center space-x-3 w-full sm:w-auto">
-                                            <SpeakerWaveIcon className="w-5 h-5 text-gray-400" />
-                                            <select
-                                                value={selectedVoice}
-                                                onChange={(e) => setSelectedVoice(e.target.value)}
-                                                className="bg-[#2a2a2a] border border-gray-700 rounded py-1.5 px-3 text-sm text-gray-200 focus:outline-none focus:border-emerald-500 flex-1 sm:w-48"
-                                            >
-                                                {ttsVoices.map(voice => (
-                                                    <option key={voice} value={voice}>{voice.replace('.wav', '')}</option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                        <div className="flex items-center space-x-3 w-full sm:w-auto justify-end">
-                                            {ttsAudioUrl && <audio controls src={ttsAudioUrl} className="h-8 max-w-[200px]" />}
-                                            {isGeneratingTTS ? (
-                                                <div className="flex items-center space-x-2">
-                                                    <WaveformVisualizer color="blue" barCount={12} compact statusMessages={['Synthesizing voice...']} />
-                                                </div>
-                                            ) : (
-                                                <button
-                                                    onClick={handleSendToTTS}
-                                                    className="bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-600/50 px-4 py-1.5 rounded-md text-sm font-medium transition-all hover:shadow-[0_0_10px_rgba(16,185,129,0.3)] flex items-center justify-center"
-                                                >
-                                                    Send to Voice
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* ─────────── TTS TAB ─────────── */}
-            {activeTab === 'tts' && (
-                <div className="max-w-3xl mx-auto">
-                    <TtsPanel initialText={transcript} />
-                </div>
-            )}
-
-            {/* ─────────── WORKFLOW TAB ─────────── */}
-            {activeTab === 'workflow' && (
-                <div className="max-w-xl mx-auto">
-                    <PipelineFlow
-                        hasTranscript={!!transcript}
-                        hasAudio={!!ttsAudioUrl}
-                        isTranscribing={isGenerating}
-                        isSynthesizing={isGeneratingTTS}
-                        onGoToASR={() => setActiveTab('asr')}
-                        onGoToTTS={() => setActiveTab('tts')}
-                    />
-                </div>
-            )}
+                )}
+            </div>
         </div>
     );
 }

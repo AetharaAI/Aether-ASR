@@ -11,8 +11,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     """Rate limiting with sliding window algorithm."""
     
     async def dispatch(self, request: Request, call_next):
-        # Skip rate limiting for health checks and docs
-        if request.url.path in ["/api/health", "/api/version", "/docs", "/redoc", "/openapi.json"]:
+        # Skip rate limiting for health checks, docs, and job status polling
+        path = request.url.path
+        if (
+            path in ["/api/health", "/api/version", "/docs", "/redoc", "/openapi.json"]
+            or (request.method == "GET" and path.startswith("/api/transcriptions/"))
+            or path.startswith("/api/transcriptions") and request.method == "GET"
+        ):
             return await call_next(request)
         
         # Get API key from header

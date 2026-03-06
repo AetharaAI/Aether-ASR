@@ -62,32 +62,46 @@ class GPUPool:
         if len(cls._models) >= cls._max_models:
             cls._evict_lru()
         
-        # Load model
-        logger.info("loading_model", model=model_name, compute_type=compute_type)
-        
+        # Load model — with CPU/int8 fallback if CUDA fails to initialize
+        logger.info("loading_model", model=model_name, compute_type=compute_type, device=cls._device)
+
         models_dir = os.getenv("WHISPER_MODELS_DIR", "/models")
-        
-        model = WhisperModel(
-            model_name,
-            device=cls._device,
-            compute_type=compute_type,
-            cpu_threads=4 if cls._device == "cpu" else 0,
-            num_workers=1,
-            download_root=models_dir
-        )
-        
-        cls._models[cache_key] = model
-        
-        # Log GPU memory
-        if torch.cuda.is_available():
-            allocated = torch.cuda.memory_allocated() / 1024**3
-            reserved = torch.cuda.memory_reserved() / 1024**3
-            logger.info(
-                "gpu_memory",
-                allocated_gb=round(allocated, 2),
-                reserved_gb=round(reserved, 2)
+
+        def _load(device: str, ct: str):
+            return WhisperModel(
+                model_name,
+                device=device,
+                compute_type=ct,
+                cpu_threads=4 if device == "cpu" else 0,
+                num_workers=1,
+                download_root=models_dir
             )
-        
+
+        try:
+            model = _load(cls._device, compute_type)
+        except Exception as cuda_err:
+            if cls._device == "cuda":
+                logger.warning(
+                    "cuda_load_failed_falling_back_to_cpu",
+                    error=str(cuda_err),
+                    model=model_name,
+                )
+                model = _load("cpu", "int8")
+                compute_type = "int8"
+                cache_key = f"{model_name}:int8"
+            else:
+                raise
+
+        cls._models[cache_key] = model
+
+        if torch.cuda.is_available():
+            try:
+                allocated = torch.cuda.memory_allocated() / 1024**3
+                reserved = torch.cuda.memory_reserved() / 1024**3
+                logger.info("gpu_memory", allocated_gb=round(allocated, 2), reserved_gb=round(reserved, 2))
+            except Exception:
+                pass
+
         return model
     
     @classmethod

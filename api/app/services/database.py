@@ -1,7 +1,7 @@
 """Database operations."""
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy import select, update, and_
-from sqlalchemy.orm import flag_modified
+from sqlalchemy.orm.attributes import flag_modified
 from typing import Optional, List, Tuple
 from datetime import datetime, timedelta
 import uuid
